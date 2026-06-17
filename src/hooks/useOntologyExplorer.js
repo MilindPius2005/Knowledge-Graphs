@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
-import { expandNode, expandRecursive, searchNode } from '../services/ontologyApi.js';
+import { expandNode, expandRecursive, searchNodes } from '../services/ontologyApi.js';
+import { recordEvent } from '../services/eventsApi.js';
 
 function getNodeId(value) {
   return typeof value === 'object' ? value.id : value;
@@ -31,6 +32,8 @@ export function useOntologyExplorer() {
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
   const [error, setError] = useState('');
 
   const loadGraph = useCallback(
@@ -43,11 +46,7 @@ export function useOntologyExplorer() {
       setError('');
 
       try {
-        const data = options.isSearch
-          ? await searchNode(cleanNode)
-          : useRecursive
-            ? await expandRecursive(cleanNode, 2)
-            : await expandNode(cleanNode);
+        const data = useRecursive ? await expandRecursive(cleanNode, 2) : await expandNode(cleanNode);
 
         setGraph(data);
         setRootNode(data.nodes[0]?.id || cleanNode);
@@ -65,6 +64,14 @@ export function useOntologyExplorer() {
           });
           setHistoryIndex((index) => index + 1);
         }
+
+        recordEvent({
+          type: 'graph_expanded',
+          nodeId: cleanNode,
+          recursiveMode: useRecursive,
+          nodeCount: data.nodes.length,
+          linkCount: data.links.length,
+        }).catch(() => {});
       } catch (requestError) {
         setError(requestError.message || 'Unable to load ontology graph.');
       } finally {
@@ -75,8 +82,34 @@ export function useOntologyExplorer() {
   );
 
   const handleSearch = useCallback(
-    (nodeId) => {
-      loadGraph(nodeId, { isSearch: true, recursiveMode: false });
+    async (query) => {
+      const cleanQuery = query.trim();
+      if (!cleanQuery) return;
+
+      setIsSearching(true);
+      setError('');
+
+      try {
+        const results = await searchNodes(cleanQuery);
+        setSearchResults(results);
+        recordEvent({
+          type: 'search_performed',
+          query: cleanQuery,
+          resultCount: results.length,
+        }).catch(() => {});
+      } catch (requestError) {
+        setError(requestError.message || 'Unable to search ontology nodes.');
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    []
+  );
+
+  const selectSearchResult = useCallback(
+    (result) => {
+      setSearchResults([]);
+      loadGraph(result.id, { recursiveMode: false });
     },
     [loadGraph]
   );
@@ -127,6 +160,8 @@ export function useOntologyExplorer() {
     selectedDetails,
     recursiveMode,
     isLoading,
+    isSearching,
+    searchResults,
     error,
     canGoBack: historyIndex > 0,
     canGoForward: historyIndex < history.length - 1,
@@ -134,6 +169,7 @@ export function useOntologyExplorer() {
     setRecursiveMode,
     loadGraph,
     handleSearch,
+    selectSearchResult,
     expandSelected,
     goBack,
     goForward,

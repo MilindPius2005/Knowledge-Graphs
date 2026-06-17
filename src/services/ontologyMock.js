@@ -122,3 +122,19 @@ export function expandRecursiveMock(node, depth = 2) {
   return expandRecursive(node, depth);
 }
 
+export function searchNodesMock(query) {
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  if (!normalizedQuery) return [];
+
+  return Object.entries(ontology)
+    .filter(([id, node]) => {
+      return id.toLowerCase().includes(normalizedQuery) || node.type.toLowerCase().includes(normalizedQuery);
+    })
+    .slice(0, 8)
+    .map(([id, node]) => ({
+      id,
+      type: node.type,
+      description: `${node.type} node`,
+    }));
+}
+

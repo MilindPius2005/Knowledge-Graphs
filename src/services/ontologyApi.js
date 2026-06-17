@@ -1,4 +1,4 @@
-import { expandNodeMock, expandRecursiveMock } from './ontologyMock.js';
+import { expandNodeMock, expandRecursiveMock, searchNodesMock } from './ontologyMock.js';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -25,6 +25,23 @@ async function requestGraph(path) {
   };
 }
 
+async function requestJson(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(message || `Request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
 export function expandNode(node) {
   if (shouldUseMock()) return Promise.resolve(expandNodeMock(node));
   return requestGraph(`/expand/${encodeURIComponent(node)}`);
@@ -32,6 +49,22 @@ export function expandNode(node) {
 
 export function searchNode(node) {
   return expandNode(node);
+}
+
+export async function searchNodes(query) {
+  if (shouldUseMock()) return Promise.resolve(searchNodesMock(query));
+
+  const params = new URLSearchParams({ q: query });
+  const data = await requestJson(`/search?${params.toString()}`);
+  const results = Array.isArray(data) ? data : data.results;
+
+  return Array.isArray(results)
+    ? results.map((result) => ({
+        id: result.id || result.name,
+        type: result.type || 'Unknown',
+        description: result.description || result.summary || '',
+      }))
+    : [];
 }
 
 export function expandRecursive(node, depth = 2) {
