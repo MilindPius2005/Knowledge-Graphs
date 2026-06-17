@@ -1,20 +1,68 @@
 const ontology = {
-  Milind: { type: 'Employee', neighbors: ['Rahul', 'IT', 'Python', 'React'] },
-  Rahul: { type: 'Employee', neighbors: ['Anjali', 'IT', 'Python', 'Neo4j'] },
-  Anjali: { type: 'Employee', neighbors: ['IT', 'Management', 'PMP'] },
-  Python: { type: 'Skill', neighbors: ['Azure Fundamentals', 'PCAP'] },
-  React: { type: 'Skill', neighbors: ['Frontend Certification'] },
-  Neo4j: { type: 'Skill', neighbors: ['Neo4j Professional'] },
-  IT: { type: 'Department', neighbors: ['Milind', 'Rahul', 'Anjali'] },
+  // =============================
+  // Employees (10–15)
+  // =============================
+  'Milind Sharma': { type: 'Employee', neighbors: ['IT', 'Python', 'SQL', 'AWS', 'Docker', 'React'] },
+  'Rahul Verma': { type: 'Employee', neighbors: ['IT', 'Java', 'SQL', 'AWS', 'Docker', 'Flask'] },
+  'Anjali Mehta': { type: 'Employee', neighbors: ['IT', 'Python', 'Machine Learning', 'Data Analysis', 'AWS', 'SQL'] },
+  'Suman Iyer': { type: 'Employee', neighbors: ['Data Science', 'Machine Learning', 'Python', 'Data Analysis', 'SQL', 'AWS'] },
+  'Rohit Nair': { type: 'Employee', neighbors: ['Data Science', 'Neo4j', 'Data Analysis', 'SQL', 'Docker', 'AWS'] },
+  'Priya Kulkarni': { type: 'Employee', neighbors: ['HR', 'React', 'Data Analysis', 'SQL', 'Docker'] },
+  'Vikram Singh': { type: 'Employee', neighbors: ['Finance', 'SQL', 'Data Analysis', 'Docker', 'AWS'] },
+  'Neha Gupta': { type: 'Employee', neighbors: ['Marketing', 'React', 'Docker', 'AWS', 'Data Analysis'] },
+  'Karan Joshi': { type: 'Employee', neighbors: ['Operations', 'Docker', 'AWS', 'SQL', 'Python'] },
+  'Meera Rao': { type: 'Employee', neighbors: ['Sales', 'SQL', 'React', 'Data Analysis', 'AWS'] },
+  'Arjun Rao': { type: 'Employee', neighbors: ['IT', 'Java', 'React', 'Docker', 'AWS', 'SQL'] },
+  'Tanya Patel': { type: 'Employee', neighbors: ['HR', 'Machine Learning', 'Data Analysis', 'SQL'] },
+  'Aditya Roy': { type: 'Employee', neighbors: ['Finance', 'Python', 'Flask', 'SQL', 'Data Analysis'] },
+  'Ishaan Banerjee': { type: 'Employee', neighbors: ['Operations', 'Python', 'Docker', 'AWS', 'Data Analysis'] },
+
+  // =============================
+  // Departments
+  // =============================
+  'IT': {
+    type: 'Department',
+    neighbors: [
+      'Milind Sharma',
+      'Rahul Verma',
+      'Anjali Mehta',
+      'Arjun Rao',
+    ],
+  },
+  'HR': { type: 'Department', neighbors: ['Priya Kulkarni', 'Tanya Patel'] },
+  'Finance': { type: 'Department', neighbors: ['Vikram Singh', 'Aditya Roy'] },
+  'Marketing': { type: 'Department', neighbors: ['Neha Gupta'] },
+  'Operations': { type: 'Department', neighbors: ['Karan Joshi', 'Ishaan Banerjee'] },
+  'Sales': { type: 'Department', neighbors: ['Meera Rao'] },
+  'Data Science': {
+    type: 'Department',
+    neighbors: ['Suman Iyer', 'Rohit Nair', 'Anjali Mehta'],
+  },
+
+  // =============================
+  // Skills
+  // =============================
+  Python: { type: 'Skill', neighbors: ['Flask', 'Machine Learning', 'Data Analysis', 'AWS', 'Neo4j'] },
+  Java: { type: 'Skill', neighbors: ['Docker', 'SQL', 'AWS', 'React'] },
+  React: { type: 'Skill', neighbors: ['Docker', 'AWS'] },
+  Flask: { type: 'Skill', neighbors: ['AWS', 'Docker'] },
+  Neo4j: { type: 'Skill', neighbors: ['Neo4j Professional', 'Neo4j Inc'] },
+  SQL: { type: 'Skill', neighbors: ['Data Analysis', 'AWS'] },
+  Docker: { type: 'Skill', neighbors: ['AWS'] },
+  AWS: { type: 'Skill', neighbors: ['Data Analysis'] },
+  'Machine Learning': { type: 'Skill', neighbors: ['Python', 'Data Analysis', 'Azure Fundamentals'] },
+  'Data Analysis': { type: 'Skill', neighbors: ['Azure Fundamentals', 'PCAP'] },
+
+  // =============================
+  // Certifications / Orgs / Companies (minimal realistic links)
+  // =============================
   'Azure Fundamentals': { type: 'Certification', neighbors: ['Microsoft'] },
   PCAP: { type: 'Certification', neighbors: ['Python Institute'] },
-  'Frontend Certification': { type: 'Certification', neighbors: ['Meta'] },
   'Neo4j Professional': { type: 'Certification', neighbors: ['Neo4j Inc'] },
-  Management: { type: 'Skill', neighbors: ['PMP'] },
-  PMP: { type: 'Certification', neighbors: ['PMI'] },
+  'PMP': { type: 'Certification', neighbors: ['PMI'] },
+
   Microsoft: { type: 'Company', neighbors: [] },
   'Python Institute': { type: 'Organization', neighbors: [] },
-  Meta: { type: 'Company', neighbors: [] },
   'Neo4j Inc': { type: 'Company', neighbors: [] },
   PMI: { type: 'Organization', neighbors: [] },
 };
@@ -122,6 +170,99 @@ export function expandRecursiveMock(node, depth = 2) {
   return expandRecursive(node, depth);
 }
 
+function getAllDepartments() {
+  return Array.from(new Set(Object.entries(ontology)
+    .filter(([, node]) => node.type === 'Department')
+    .map(([id]) => id)
+  )).sort((a, b) => a.localeCompare(b));
+}
+
+function getAllSkills() {
+  return Array.from(new Set(Object.entries(ontology)
+    .filter(([, node]) => node.type === 'Skill')
+    .map(([id]) => id)
+  )).sort((a, b) => a.localeCompare(b));
+}
+
+function normalize(s) {
+  return String(s ?? '').trim().toLowerCase();
+}
+
+function getCanonical(input) {
+  const q = normalize(input);
+  if (!q) return null;
+  return Object.keys(ontology).find((k) => k.toLowerCase() === q) || null;
+}
+
+function isMatch(filters, employeeId) {
+  const nameFilter = normalize(filters.name);
+  const deptFilter = normalize(filters.department);
+  const skillFilter = normalize(filters.skill);
+
+  const employeeCanonical = getCanonical(employeeId);
+  if (!employeeCanonical) return false;
+
+  if (nameFilter && employeeCanonical.toLowerCase() !== nameFilter) return false;
+
+  // AND across filters. For dept/skill we treat them as ontology node names.
+  if (deptFilter) {
+    const deptCanonical = getCanonical(filters.department);
+    if (!deptCanonical) return false;
+
+    const deptNode = ontology[deptCanonical];
+    if (!deptNode || deptNode.type !== 'Department') return false;
+
+    if (!deptNode.neighbors.map(normalize).includes(employeeCanonical.toLowerCase())) return false;
+  }
+
+  if (skillFilter) {
+    const skillCanonical = getCanonical(filters.skill);
+    if (!skillCanonical) return false;
+
+    const skillNode = ontology[skillCanonical];
+    if (!skillNode || skillNode.type !== 'Skill') return false;
+
+    // Employee has the skill if their direct neighbors include the Skill node.
+    const employeeNode = ontology[employeeCanonical];
+    if (!employeeNode || employeeNode.type !== 'Employee') return false;
+
+    if (!employeeNode.neighbors.map(normalize).includes(skillCanonical.toLowerCase())) return false;
+  }
+
+
+  return true;
+}
+
+export function getDepartmentsMock() {
+  return getAllDepartments();
+}
+
+export function getSkillsMock() {
+  return getAllSkills();
+}
+
+export function filterEmployeesMock(filters = {}) {
+  const name = normalize(filters.name);
+  const department = normalize(filters.department);
+  const skill = normalize(filters.skill);
+
+  const hasAny = Boolean(name || department || skill);
+  if (!hasAny) return [];
+
+  const employees = Object.entries(ontology)
+    .filter(([, node]) => node.type === 'Employee')
+    .map(([id]) => id);
+
+  const matches = employees.filter((empId) => isMatch({ name, department, skill }, empId));
+
+  // Return matching employees as graph roots. Keep shape consistent with SearchBar results.
+  return matches.slice(0, 8).map((id) => ({
+    id,
+    type: ontology[id]?.type || 'Employee',
+    description: `Employee in selected filters`,
+  }));
+}
+
 export function searchNodesMock(query) {
   const normalizedQuery = String(query || '').trim().toLowerCase();
   if (!normalizedQuery) return [];
@@ -137,4 +278,5 @@ export function searchNodesMock(query) {
       description: `${node.type} node`,
     }));
 }
+
 

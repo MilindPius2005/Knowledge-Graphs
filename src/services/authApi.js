@@ -23,23 +23,31 @@ async function requestJson(path, options = {}) {
   return response.json();
 }
 
+// Used only for local/mock authentication. Avoids hard failing when crypto.subtle
+// is unavailable (older runtimes / non-secure contexts).
 async function digestPassword(password, salt) {
   const subtle = globalThis?.crypto?.subtle;
 
-  if (!subtle?.digest) {
-    throw new Error(
-      'Your browser/runtime does not support crypto.subtle.digest (required for password hashing). ' +
-        'Try using HTTPS, a modern browser, or switch VITE_USE_MOCK_AUTH=true.'
-    );
+  // Preferred path: SHA-256 via WebCrypto
+  if (subtle?.digest) {
+    const data = new TextEncoder().encode(`${salt}:${password}`);
+    const hashBuffer = await subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
   }
 
-  const data = new TextEncoder().encode(`${salt}:${password}`);
-  const hashBuffer = await subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
+  // Fallback: deterministic non-cryptographic hash (prevents runtime crash).
+  // This keeps the “normal sign-in page” working with mock auth.
+  let h = 2166136261;
+  const s = `${salt}:${password}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
 
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
 
 function readMockUsers() {
   return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || '{"users":[],"session":null}');
@@ -129,3 +137,4 @@ export async function signOut() {
   writeMockUsers(store);
   return { ok: true };
 }
+

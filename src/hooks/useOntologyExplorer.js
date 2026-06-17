@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { expandNode, expandRecursive, searchNodes } from '../services/ontologyApi.js';
+import { expandNode, expandRecursive, searchNodes, filterEmployees } from '../services/ontologyApi.js';
 import { recordEvent } from '../services/eventsApi.js';
 
 function getNodeId(value) {
@@ -9,7 +9,9 @@ function getNodeId(value) {
 function getParentNode(graph, selectedNode) {
   if (!selectedNode) return null;
   const selectedId = selectedNode.id;
-  const incoming = graph.links.find((link) => getNodeId(link.target) === selectedId);
+  const links = Array.isArray(graph?.links) ? graph.links : [];
+  const incoming = links.find((link) => getNodeId(link.target) === selectedId);
+
   return incoming ? getNodeId(incoming.source) : null;
 }
 
@@ -17,11 +19,15 @@ function getConnectedCount(graph, selectedNode) {
   if (!selectedNode) return 0;
   const selectedId = selectedNode.id;
 
-  return graph.links.filter((link) => {
-    const source = getNodeId(link.source);
-    const target = getNodeId(link.target);
-    return source === selectedId || target === selectedId;
-  }).length;
+  const links = Array.isArray(graph?.links) ? graph.links : [];
+
+  return links
+    .filter((link) => {
+      const source = getNodeId(link.source);
+      const target = getNodeId(link.target);
+      return source === selectedId || target === selectedId;
+    })
+    .length;
 }
 
 export function useOntologyExplorer() {
@@ -36,6 +42,8 @@ export function useOntologyExplorer() {
   const [searchResults, setSearchResults] = useState([]);
   const [error, setError] = useState('');
 
+  const [pendingGraphRoot, setPendingGraphRoot] = useState(null);
+
   const loadGraph = useCallback(
     async (nodeId, options = {}) => {
       const cleanNode = nodeId.trim();
@@ -48,8 +56,14 @@ export function useOntologyExplorer() {
       try {
         const data = useRecursive ? await expandRecursive(cleanNode, 2) : await expandNode(cleanNode);
 
-        setGraph(data);
-        setRootNode(data.nodes[0]?.id || cleanNode);
+        const normalizedGraph = {
+          nodes: Array.isArray(data?.nodes) ? data.nodes : [],
+          links: Array.isArray(data?.links) ? data.links : [],
+        };
+
+        setGraph(normalizedGraph);
+        setRootNode(normalizedGraph.nodes[0]?.id || cleanNode);
+
         setSelectedNode(
           data.nodes.find((node) => String(node.id).toLowerCase() === cleanNode.toLowerCase()) ||
             data.nodes[0] ||
@@ -69,8 +83,8 @@ export function useOntologyExplorer() {
           type: 'graph_expanded',
           nodeId: cleanNode,
           recursiveMode: useRecursive,
-          nodeCount: data.nodes.length,
-          linkCount: data.links.length,
+          nodeCount: normalizedGraph.nodes.length,
+          linkCount: normalizedGraph.links.length,
         }).catch(() => {});
       } catch (requestError) {
         setError(requestError.message || 'Unable to load ontology graph.');
@@ -81,15 +95,16 @@ export function useOntologyExplorer() {
     [historyIndex, recursiveMode]
   );
 
-  const handleSearch = useCallback(
-    async (query) => {
-      const cleanQuery = query.trim();
-      if (!cleanQuery) return;
+  const handleSearch = useCallback(async (queryOrFilters) => {
+    setIsSearching(true);
+    setError('');
 
-      setIsSearching(true);
-      setError('');
+    try {
+      // Support both legacy free-text search (string) and new filter search (object).
+      if (typeof queryOrFilters === 'string') {
+        const cleanQuery = queryOrFilters.trim();
+        if (!cleanQuery) return;
 
-      try {
         const results = await searchNodes(cleanQuery);
         setSearchResults(results);
         recordEvent({
@@ -97,22 +112,34 @@ export function useOntologyExplorer() {
           query: cleanQuery,
           resultCount: results.length,
         }).catch(() => {});
-      } catch (requestError) {
-        setError(requestError.message || 'Unable to search ontology nodes.');
-      } finally {
-        setIsSearching(false);
+        return;
       }
-    },
-    []
-  );
 
-  const selectSearchResult = useCallback(
-    (result) => {
-      setSearchResults([]);
-      loadGraph(result.id, { recursiveMode: false });
-    },
-    [loadGraph]
-  );
+      // Filter-based search: AND logic handled by mock/backend.
+      const results = await filterEmployees(queryOrFilters);
+      setSearchResults(results);
+
+      recordEvent({
+        type: 'filter_search_performed',
+        filters: queryOrFilters,
+        resultCount: results.length,
+      }).catch(() => {});
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to search ontology nodes.');
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  const selectSearchResult = useCallback((result) => {
+    setPendingGraphRoot(result?.id ?? null);
+  }, []);
+
+  const generateKnowledgeGraph = useCallback(() => {
+    if (!pendingGraphRoot) return;
+    setError('');
+    loadGraph(pendingGraphRoot, { recursiveMode: false });
+  }, [loadGraph, pendingGraphRoot]);
 
   const expandSelected = useCallback(() => {
     if (selectedNode) {
@@ -158,6 +185,7 @@ export function useOntologyExplorer() {
     rootNode,
     selectedNode,
     selectedDetails,
+    pendingGraphRoot,
     recursiveMode,
     isLoading,
     isSearching,
@@ -173,5 +201,7 @@ export function useOntologyExplorer() {
     expandSelected,
     goBack,
     goForward,
+    generateKnowledgeGraph,
   };
 }
+

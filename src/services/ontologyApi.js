@@ -1,4 +1,11 @@
-import { expandNodeMock, expandRecursiveMock, searchNodesMock } from './ontologyMock.js';
+import {
+  expandNodeMock,
+  expandRecursiveMock,
+  searchNodesMock,
+  filterEmployeesMock,
+  getDepartmentsMock,
+  getSkillsMock,
+} from './ontologyMock.js';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -19,6 +26,7 @@ async function requestGraph(path) {
   }
 
   const data = await response.json();
+
   return {
     nodes: Array.isArray(data.nodes) ? data.nodes : [],
     links: Array.isArray(data.links) ? data.links : [],
@@ -43,7 +51,10 @@ async function requestJson(path, options = {}) {
 }
 
 export function expandNode(node) {
-  if (shouldUseMock()) return Promise.resolve(expandNodeMock(node));
+  if (shouldUseMock()) {
+    return Promise.resolve(expandNodeMock(node));
+  }
+
   return requestGraph(`/expand/${encodeURIComponent(node)}`);
 }
 
@@ -52,10 +63,14 @@ export function searchNode(node) {
 }
 
 export async function searchNodes(query) {
-  if (shouldUseMock()) return Promise.resolve(searchNodesMock(query));
+  if (shouldUseMock()) {
+    return Promise.resolve(searchNodesMock(query));
+  }
 
   const params = new URLSearchParams({ q: query });
+
   const data = await requestJson(`/search?${params.toString()}`);
+
   const results = Array.isArray(data) ? data : data.results;
 
   return Array.isArray(results)
@@ -67,8 +82,53 @@ export async function searchNodes(query) {
     : [];
 }
 
-export function expandRecursive(node, depth = 2) {
-  if (shouldUseMock()) return Promise.resolve(expandRecursiveMock(node, depth));
-  return requestGraph(`/expand_recursive/${encodeURIComponent(node)}/${depth}`);
+/*
+ * FIXED: Must return a Promise because SearchBar.jsx uses:
+ * getDepartments().then(...)
+ */
+export function getDepartments() {
+  if (shouldUseMock()) {
+    return Promise.resolve(getDepartmentsMock());
+  }
+
+  // Replace with requestJson('/departments')
+  // when Flask endpoint is implemented
+  return Promise.resolve([]);
 }
 
+/*
+ * FIXED: Must return a Promise because SearchBar.jsx uses:
+ * getSkills().then(...)
+ */
+export function getSkills() {
+  if (shouldUseMock()) {
+    return Promise.resolve(getSkillsMock());
+  }
+
+  // Replace with requestJson('/skills')
+  // when Flask endpoint is implemented
+  return Promise.resolve([]);
+}
+
+export async function filterEmployees({ name, department, skill }) {
+  if (shouldUseMock()) {
+    return filterEmployeesMock({
+      name,
+      department,
+      skill,
+    });
+  }
+
+  // Replace with backend endpoint later if needed
+  return [];
+}
+
+export function expandRecursive(node, depth = 2) {
+  if (shouldUseMock()) {
+    return Promise.resolve(expandRecursiveMock(node, depth));
+  }
+
+  return requestGraph(
+    `/expand_recursive/${encodeURIComponent(node)}/${depth}`
+  );
+}

@@ -66,6 +66,8 @@ export default function ExplorerPage({ user, onLogout }) {
                 isSearching={explorer.isSearching}
                 rootNode={explorer.rootNode}
                 results={explorer.searchResults}
+                onGenerateKnowledgeGraph={explorer.generateKnowledgeGraph}
+                hasPendingResult={Boolean(explorer.pendingGraphRoot)}
               />
             ) : null}
           </div>
@@ -77,3 +79,4 @@ export default function ExplorerPage({ user, onLogout }) {
     </main>
   );
 }
+
