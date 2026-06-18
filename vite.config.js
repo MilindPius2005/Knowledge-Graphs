@@ -8,6 +8,11 @@ export default defineConfig({
     proxy: {
       '/expand': 'http://localhost:5000',
       '/expand_recursive': 'http://localhost:5000',
+      '/search': 'http://localhost:5000',
+      '/departments': 'http://localhost:5000',
+      '/skills': 'http://localhost:5000',
+      '/employees': 'http://localhost:5000',
+      '/overrides': 'http://localhost:5000',
     },
   },
 });

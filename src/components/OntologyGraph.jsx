@@ -181,7 +181,7 @@ const link = linkLayer
       .attr('class', 'graph-label')
       .attr('dx', (d) => getStyle(d.type).radius + 8)
       .attr('dy', 4)
-      .text((d) => d.id);
+      .text((d) => d.label || d.id);
 
     const simulation = d3
       .forceSimulation(nodes)

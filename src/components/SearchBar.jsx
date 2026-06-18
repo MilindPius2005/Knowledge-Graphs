@@ -10,6 +10,7 @@ export default function SearchBar({
   isSearching,
   rootNode,
   results,
+  pendingGraphRoot,
   hasPendingResult,
 }) {
   const [name, setName] = useState('');
@@ -20,7 +21,7 @@ export default function SearchBar({
   const [skills, setSkills] = useState([]);
 
   useEffect(() => {
-    // Populate dropdowns from dataset (mock-backed via ontologyApi).
+    // Populate dropdowns through the ontology API adapter.
     getDepartments().then(setDepartments).catch(() => setDepartments([]));
     getSkills().then(setSkills).catch(() => setSkills([]));
   }, []);
@@ -122,8 +123,9 @@ export default function SearchBar({
             <button
               key={`${result.id}-${result.type}`}
               type="button"
-              className="search-result"
+              className={`search-result ${pendingGraphRoot === result.id ? 'selected' : ''}`}
               onClick={() => onSelectResult(result)}
+              aria-selected={pendingGraphRoot === result.id}
             >
               <span>
                 <strong>{result.id}</strong>

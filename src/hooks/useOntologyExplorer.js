@@ -30,7 +30,7 @@ function getConnectedCount(graph, selectedNode) {
     .length;
 }
 
-export function useOntologyExplorer() {
+export function useOntologyExplorer(username) {
   const [graph, setGraph] = useState({ nodes: [], links: [] });
   const [rootNode, setRootNode] = useState('');
   const [selectedNode, setSelectedNode] = useState(null);
@@ -54,7 +54,9 @@ export function useOntologyExplorer() {
       setError('');
 
       try {
-        const data = useRecursive ? await expandRecursive(cleanNode, 2) : await expandNode(cleanNode);
+        const data = useRecursive
+          ? await expandRecursive(cleanNode, 2, username)
+          : await expandNode(cleanNode, username);
 
         const normalizedGraph = {
           nodes: Array.isArray(data?.nodes) ? data.nodes : [],
@@ -92,12 +94,13 @@ export function useOntologyExplorer() {
         setIsLoading(false);
       }
     },
-    [historyIndex, recursiveMode]
+    [historyIndex, recursiveMode, username]
   );
 
   const handleSearch = useCallback(async (queryOrFilters) => {
     setIsSearching(true);
     setError('');
+    setPendingGraphRoot(null);
 
     try {
       // Support both legacy free-text search (string) and new filter search (object).
@@ -107,6 +110,7 @@ export function useOntologyExplorer() {
 
         const results = await searchNodes(cleanQuery);
         setSearchResults(results);
+        setPendingGraphRoot(results[0]?.id ?? null);
         recordEvent({
           type: 'search_performed',
           query: cleanQuery,
@@ -118,6 +122,7 @@ export function useOntologyExplorer() {
       // Filter-based search: AND logic handled by mock/backend.
       const results = await filterEmployees(queryOrFilters);
       setSearchResults(results);
+      setPendingGraphRoot(results[0]?.id ?? null);
 
       recordEvent({
         type: 'filter_search_performed',
@@ -137,8 +142,11 @@ export function useOntologyExplorer() {
 
   const generateKnowledgeGraph = useCallback(() => {
     if (!pendingGraphRoot) return;
+    const graphRoot = pendingGraphRoot;
     setError('');
-    loadGraph(pendingGraphRoot, { recursiveMode: false });
+    setSearchResults([]);
+    setPendingGraphRoot(null);
+    loadGraph(graphRoot, { recursiveMode: false });
   }, [loadGraph, pendingGraphRoot]);
 
   const expandSelected = useCallback(() => {

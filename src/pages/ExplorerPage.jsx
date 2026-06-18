@@ -12,7 +12,7 @@ import { useOntologyExplorer } from '../hooks/useOntologyExplorer.js';
 export default function ExplorerPage({ user, onLogout }) {
   const graphRef = useRef(null);
   const [activeView, setActiveView] = useState('explorer');
-  const explorer = useOntologyExplorer();
+  const explorer = useOntologyExplorer(user.email);
 
   function renderWorkspace() {
     if (activeView === 'events') return <EventsPanel />;
@@ -52,6 +52,12 @@ export default function ExplorerPage({ user, onLogout }) {
         onRecursiveModeChange={explorer.setRecursiveMode}
         rootNode={explorer.rootNode}
         graph={explorer.graph}
+        username={user.email}
+        onOverrideChanged={() => {
+          if (explorer.rootNode) {
+            explorer.loadGraph(explorer.rootNode, { pushHistory: false });
+          }
+        }}
       />
 
       <section className="workspace">
@@ -66,6 +72,7 @@ export default function ExplorerPage({ user, onLogout }) {
                 isSearching={explorer.isSearching}
                 rootNode={explorer.rootNode}
                 results={explorer.searchResults}
+                pendingGraphRoot={explorer.pendingGraphRoot}
                 onGenerateKnowledgeGraph={explorer.generateKnowledgeGraph}
                 hasPendingResult={Boolean(explorer.pendingGraphRoot)}
               />
@@ -79,4 +86,3 @@ export default function ExplorerPage({ user, onLogout }) {
     </main>
   );
 }
-

@@ -1,24 +1,13 @@
-import {
-  expandNodeMock,
-  expandRecursiveMock,
-  searchNodesMock,
-  filterEmployeesMock,
-  getDepartmentsMock,
-  getSkillsMock,
-} from './ontologyMock.js';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-
-function shouldUseMock() {
-  // Use mock when explicitly enabled, or when no backend URL is provided.
-  const v = import.meta.env.VITE_USE_MOCK_ONTOLOGY;
-  if (v === 'true') return true;
-  if (!API_BASE_URL) return true;
-  return false;
+function userHeaders(username) {
+  return username ? { 'X-Ontology-User': username } : {};
 }
 
-async function requestGraph(path) {
-  const response = await fetch(`${API_BASE_URL}${path}`);
+async function requestGraph(path, username) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: userHeaders(username),
+  });
 
   if (!response.ok) {
     const message = await response.text().catch(() => '');
@@ -35,11 +24,11 @@ async function requestGraph(path) {
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
-    ...options,
   });
 
   if (!response.ok) {
@@ -50,12 +39,8 @@ async function requestJson(path, options = {}) {
   return response.json();
 }
 
-export function expandNode(node) {
-  if (shouldUseMock()) {
-    return Promise.resolve(expandNodeMock(node));
-  }
-
-  return requestGraph(`/expand/${encodeURIComponent(node)}`);
+export function expandNode(node, username) {
+  return requestGraph(`/expand/${encodeURIComponent(node)}`, username);
 }
 
 export function searchNode(node) {
@@ -63,10 +48,6 @@ export function searchNode(node) {
 }
 
 export async function searchNodes(query) {
-  if (shouldUseMock()) {
-    return Promise.resolve(searchNodesMock(query));
-  }
-
   const params = new URLSearchParams({ q: query });
 
   const data = await requestJson(`/search?${params.toString()}`);
@@ -82,53 +63,49 @@ export async function searchNodes(query) {
     : [];
 }
 
-/*
- * FIXED: Must return a Promise because SearchBar.jsx uses:
- * getDepartments().then(...)
- */
 export function getDepartments() {
-  if (shouldUseMock()) {
-    return Promise.resolve(getDepartmentsMock());
-  }
-
-  // Replace with requestJson('/departments')
-  // when Flask endpoint is implemented
-  return Promise.resolve([]);
+  return requestJson('/departments');
 }
 
-/*
- * FIXED: Must return a Promise because SearchBar.jsx uses:
- * getSkills().then(...)
- */
 export function getSkills() {
-  if (shouldUseMock()) {
-    return Promise.resolve(getSkillsMock());
-  }
-
-  // Replace with requestJson('/skills')
-  // when Flask endpoint is implemented
-  return Promise.resolve([]);
+  return requestJson('/skills');
 }
 
 export async function filterEmployees({ name, department, skill }) {
-  if (shouldUseMock()) {
-    return filterEmployeesMock({
-      name,
-      department,
-      skill,
-    });
-  }
+  const params = new URLSearchParams();
+  if (name) params.set('name', name);
+  if (department) params.set('department', department);
+  if (skill) params.set('skill', skill);
 
-  // Replace with backend endpoint later if needed
-  return [];
+  const data = await requestJson(`/employees?${params.toString()}`);
+  const results = Array.isArray(data) ? data : data.results;
+  return Array.isArray(results) ? results : [];
 }
 
-export function expandRecursive(node, depth = 2) {
-  if (shouldUseMock()) {
-    return Promise.resolve(expandRecursiveMock(node, depth));
-  }
-
+export function expandRecursive(node, depth = 2, username) {
   return requestGraph(
-    `/expand_recursive/${encodeURIComponent(node)}/${depth}`
+    `/expand_recursive/${encodeURIComponent(node)}/${depth}`,
+    username
   );
+}
+
+export function getNodeOverride(node, username) {
+  return requestJson(`/overrides/${encodeURIComponent(node)}`, {
+    headers: userHeaders(username),
+  });
+}
+
+export function saveNodeOverride(node, username, override) {
+  return requestJson(`/overrides/${encodeURIComponent(node)}`, {
+    method: 'PUT',
+    headers: userHeaders(username),
+    body: JSON.stringify(override),
+  });
+}
+
+export function resetNodeOverride(node, username) {
+  return requestJson(`/overrides/${encodeURIComponent(node)}`, {
+    method: 'DELETE',
+    headers: userHeaders(username),
+  });
 }

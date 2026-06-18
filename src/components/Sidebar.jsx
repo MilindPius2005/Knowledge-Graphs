@@ -1,3 +1,5 @@
+import NodeOverrideEditor from './NodeOverrideEditor.jsx';
+
 const typeLabels = {
   Employee: 'Employee',
   Department: 'Department',
@@ -13,6 +15,8 @@ export default function Sidebar({
   onRecursiveModeChange,
   rootNode,
   graph,
+  username,
+  onOverrideChanged,
 }) {
   const { node, connectedCount, parentNode } = selectedDetails;
 
@@ -49,24 +53,32 @@ export default function Sidebar({
       <section className="sidebar-section">
         <div className="section-heading">Selected Node</div>
         {node ? (
-          <div className="details-panel">
-            <div>
-              <span>Name</span>
-              <strong>{node.id}</strong>
+          <>
+            <div className="details-panel">
+              <div>
+                <span>Name</span>
+                <strong>{node.label || node.id}</strong>
+                {node.label && node.label !== node.id ? <small>Original: {node.id}</small> : null}
+              </div>
+              <div>
+                <span>Type</span>
+                <strong>{typeLabels[node.type] || node.type || 'Unknown'}</strong>
+              </div>
+              <div>
+                <span>Connected Nodes</span>
+                <strong>{connectedCount}</strong>
+              </div>
+              <div>
+                <span>Parent Node</span>
+                <strong>{parentNode || 'None'}</strong>
+              </div>
             </div>
-            <div>
-              <span>Type</span>
-              <strong>{typeLabels[node.type] || node.type || 'Unknown'}</strong>
-            </div>
-            <div>
-              <span>Connected Nodes</span>
-              <strong>{connectedCount}</strong>
-            </div>
-            <div>
-              <span>Parent Node</span>
-              <strong>{parentNode || 'None'}</strong>
-            </div>
-          </div>
+            <NodeOverrideEditor
+              node={node}
+              username={username}
+              onChanged={onOverrideChanged}
+            />
+          </>
         ) : (
           <p className="empty-copy">Select a node to inspect its ontology context.</p>
         )}
