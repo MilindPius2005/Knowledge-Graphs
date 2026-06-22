@@ -22,6 +22,77 @@ function normalizeGraph(graph) {
   };
 }
 
+function getLinkNodeId(value) {
+  return typeof value === 'object' ? value.id : value;
+}
+
+function buildStructuredLayout(nodes, links, rootNode, width, height) {
+  const validNodeIds = new Set(nodes.map((node) => node.id));
+  const adjacency = new Map(nodes.map((node) => [node.id, []]));
+
+  links.forEach((link) => {
+    const source = getLinkNodeId(link.source);
+    const target = getLinkNodeId(link.target);
+    if (!validNodeIds.has(source) || !validNodeIds.has(target)) return;
+    adjacency.get(source).push(target);
+    adjacency.get(target).push(source);
+  });
+
+  const start = validNodeIds.has(rootNode) ? rootNode : nodes[0]?.id;
+  const depthById = new Map();
+  const queue = [];
+
+  if (start) {
+    depthById.set(start, 0);
+    queue.push(start);
+  }
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    const currentDepth = depthById.get(current);
+    adjacency.get(current).forEach((neighbor) => {
+      if (depthById.has(neighbor)) return;
+      depthById.set(neighbor, currentDepth + 1);
+      queue.push(neighbor);
+    });
+  }
+
+  nodes.forEach((node) => {
+    if (!depthById.has(node.id)) {
+      depthById.set(node.id, Math.max(1, depthById.size));
+    }
+  });
+
+  const columns = new Map();
+  nodes.forEach((node) => {
+    const depth = depthById.get(node.id) || 0;
+    columns.set(depth, [...(columns.get(depth) || []), node]);
+  });
+
+  const orderedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
+  const horizontalGap = width / Math.max(orderedDepths.length + 1, 2);
+  const positions = new Map();
+
+  orderedDepths.forEach((depth, depthIndex) => {
+    const columnNodes = columns.get(depth).sort((a, b) => {
+      if (a.id === start) return -1;
+      if (b.id === start) return 1;
+      return (a.label || a.id).localeCompare(b.label || b.id);
+    });
+    const verticalGap = height / Math.max(columnNodes.length + 1, 2);
+    const x = horizontalGap * (depthIndex + 1);
+
+    columnNodes.forEach((node, nodeIndex) => {
+      positions.set(node.id, {
+        x,
+        y: verticalGap * (nodeIndex + 1),
+      });
+    });
+  });
+
+  return positions;
+}
+
 const OntologyGraph = forwardRef(function OntologyGraph(
   { graph, selectedNode, rootNode, onNodeSelect, onNodeExpand, isLoading },
   ref
@@ -29,7 +100,7 @@ const OntologyGraph = forwardRef(function OntologyGraph(
   const wrapperRef = useRef(null);
   const svgRef = useRef(null);
   const zoomRef = useRef(null);
-  const simulationRef = useRef(null);
+  const layoutRef = useRef(new Map());
 
   useImperativeHandle(ref, () => ({
     centerGraph() {
@@ -51,13 +122,15 @@ const OntologyGraph = forwardRef(function OntologyGraph(
 
     const width = wrapper.clientWidth;
     const height = wrapper.clientHeight;
-    const nodes = simulationRef.current?.nodes() || [];
-    const bounds = nodes.reduce(
+    const positions = Array.from(layoutRef.current.values());
+    if (!positions.length) return;
+
+    const bounds = positions.reduce(
       (acc, node) => ({
-        minX: Math.min(acc.minX, node.x || 0),
-        maxX: Math.max(acc.maxX, node.x || 0),
-        minY: Math.min(acc.minY, node.y || 0),
-        maxY: Math.max(acc.maxY, node.y || 0),
+        minX: Math.min(acc.minX, node.x),
+        maxX: Math.max(acc.maxX, node.x),
+        minY: Math.min(acc.minY, node.y),
+        maxY: Math.max(acc.maxY, node.y),
       }),
       { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
     );
@@ -84,7 +157,6 @@ const OntologyGraph = forwardRef(function OntologyGraph(
     const width = wrapper.clientWidth;
     const height = wrapper.clientHeight;
 
-    simulationRef.current?.stop();
     svg.selectAll('*').remove();
     svg.attr('viewBox', `0 0 ${width} ${height}`);
 
@@ -110,34 +182,39 @@ const OntologyGraph = forwardRef(function OntologyGraph(
 
     svg.call(zoomRef.current);
 
-if (!nodes.length) {
-  return undefined;
-}
+    if (!nodes.length) {
+      layoutRef.current = new Map();
+      return undefined;
+    }
 
-const nodeIds = new Set(nodes.map((n) => n.id));
+    const nodeIds = new Set(nodes.map((n) => n.id));
 
-const validLinks = links.filter((link) => {
-  const source =
-    typeof link.source === 'object'
-      ? link.source.id
-      : link.source;
+    const validLinks = links.filter((link) => {
+      const source = getLinkNodeId(link.source);
+      const target = getLinkNodeId(link.target);
 
-  const target =
-    typeof link.target === 'object'
-      ? link.target.id
-      : link.target;
+      return nodeIds.has(source) && nodeIds.has(target);
+    });
 
-  return (
-    nodeIds.has(source) &&
-    nodeIds.has(target)
-  );
-});
+    const positions = buildStructuredLayout(nodes, validLinks, rootNode, width, height);
+    layoutRef.current = positions;
 
-const link = linkLayer
-  .selectAll('line')
-  .data(validLinks)
-  .join('line')
-  .attr('class', 'graph-link');
+    function handleNodeClick(event, d) {
+      event.stopPropagation();
+      onNodeSelect(d);
+      onNodeExpand(d);
+    }
+
+    const link = linkLayer
+      .selectAll('line')
+      .data(validLinks)
+      .join('line')
+      .attr('class', 'graph-link')
+      .attr('x1', (d) => positions.get(getLinkNodeId(d.source))?.x || 0)
+      .attr('y1', (d) => positions.get(getLinkNodeId(d.source))?.y || 0)
+      .attr('x2', (d) => positions.get(getLinkNodeId(d.target))?.x || 0)
+      .attr('y2', (d) => positions.get(getLinkNodeId(d.target))?.y || 0);
+
     const node = nodeLayer
       .selectAll('circle')
       .data(nodes)
@@ -150,29 +227,9 @@ const link = linkLayer
       })
       .attr('r', (d) => getStyle(d.type).radius)
       .attr('fill', (d) => getStyle(d.type).color)
-      .on('click', (event, d) => {
-        event.stopPropagation();
-        onNodeSelect(d);
-        onNodeExpand(d);
-      })
-      .call(
-        d3
-          .drag()
-          .on('start', (event, d) => {
-            if (!event.active) simulationRef.current.alphaTarget(0.24).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on('drag', (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on('end', (event, d) => {
-            if (!event.active) simulationRef.current.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          })
-      );
+      .attr('cx', (d) => positions.get(d.id)?.x || 0)
+      .attr('cy', (d) => positions.get(d.id)?.y || 0)
+      .on('click', handleNodeClick);
 
     const label = labelLayer
       .selectAll('text')
@@ -181,46 +238,39 @@ const link = linkLayer
       .attr('class', 'graph-label')
       .attr('dx', (d) => getStyle(d.type).radius + 8)
       .attr('dy', 4)
-      .text((d) => d.label || d.id);
+      .attr('x', (d) => positions.get(d.id)?.x || 0)
+      .attr('y', (d) => positions.get(d.id)?.y || 0)
+      .text((d) => d.label || d.id)
+      .on('click', handleNodeClick);
 
-    const simulation = d3
-      .forceSimulation(nodes)
-      .force(
-        'link',
-        d3
-          .forceLink(validLinks)
-          .id((d) => d.id)
-          .distance((d) => {
-            const sourceType = typeof d.source === 'object' ? d.source.type : '';
-            const targetType = typeof d.target === 'object' ? d.target.type : '';
-            return sourceType === 'Employee' || targetType === 'Employee' ? 132 : 108;
-          })
-          .strength(0.72)
-      )
-      .force('charge', d3.forceManyBody().strength(-560))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide().radius((d) => getStyle(d.type).radius + 18).iterations(3))
-      .force('x', d3.forceX(width / 2).strength(0.035))
-      .force('y', d3.forceY(height / 2).strength(0.035));
+    const statusBadge = labelLayer
+      .selectAll('g.graph-status-badge')
+      .data(nodes.filter((d) => d.type === 'Employee' && d.deploymentStatus))
+      .join('g')
+      .attr('class', 'graph-status-badge')
+      .attr('transform', (d) => {
+        const pos = positions.get(d.id) || { x: 0, y: 0 };
+        return `translate(${pos.x + getStyle(d.type).radius + 8}, ${pos.y + 14})`;
+      });
 
-    simulationRef.current = simulation;
+    statusBadge
+      .append('rect')
+      .attr('width', (d) => Math.max(78, String(d.deploymentStatus).length * 8 + 18))
+      .attr('height', 20)
+      .attr('rx', 5);
 
-    simulation.on('tick', () => {
-      link
-        .attr('x1', (d) => d.source.x)
-        .attr('y1', (d) => d.source.y)
-        .attr('x2', (d) => d.target.x)
-        .attr('y2', (d) => d.target.y);
+    statusBadge
+      .append('text')
+      .attr('x', 9)
+      .attr('y', 14)
+      .text((d) => `[${d.deploymentStatus}]`);
 
-      node.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
-      label.attr('x', (d) => d.x).attr('y', (d) => d.y);
-    });
+    statusBadge.on('click', handleNodeClick);
 
     const centerTimer = window.setTimeout(centerGraph, 650);
 
     return () => {
       window.clearTimeout(centerTimer);
-      simulation.stop();
     };
   }, [graph, onNodeExpand, onNodeSelect, rootNode, selectedNode?.id]);
 

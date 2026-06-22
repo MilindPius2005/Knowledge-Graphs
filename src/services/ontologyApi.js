@@ -47,20 +47,25 @@ export function searchNode(node) {
   return expandNode(node);
 }
 
-export async function searchNodes(query) {
+function normalizeResult(result) {
+  return {
+    id: result.id || result.name,
+    label: result.label || result.id || result.name,
+    type: result.type || 'Unknown',
+    description: result.description || result.summary || '',
+  };
+}
+
+export async function searchNodes(query, username) {
   const params = new URLSearchParams({ q: query });
 
-  const data = await requestJson(`/search?${params.toString()}`);
+  const data = await requestJson(`/search?${params.toString()}`, {
+    headers: userHeaders(username),
+  });
 
   const results = Array.isArray(data) ? data : data.results;
 
-  return Array.isArray(results)
-    ? results.map((result) => ({
-        id: result.id || result.name,
-        type: result.type || 'Unknown',
-        description: result.description || result.summary || '',
-      }))
-    : [];
+  return Array.isArray(results) ? results.map(normalizeResult) : [];
 }
 
 export function getDepartments() {
@@ -71,15 +76,23 @@ export function getSkills() {
   return requestJson('/skills');
 }
 
-export async function filterEmployees({ name, department, skill }) {
-  const params = new URLSearchParams();
-  if (name) params.set('name', name);
-  if (department) params.set('department', department);
-  if (skill) params.set('skill', skill);
+export function getFilterOptions() {
+  return requestJson('/filter-options');
+}
 
-  const data = await requestJson(`/employees?${params.toString()}`);
+export async function filterEmployees(filters = {}, username) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      params.set(key, String(value).trim());
+    }
+  });
+
+  const data = await requestJson(`/employees?${params.toString()}`, {
+    headers: userHeaders(username),
+  });
   const results = Array.isArray(data) ? data : data.results;
-  return Array.isArray(results) ? results : [];
+  return Array.isArray(results) ? results.map(normalizeResult) : [];
 }
 
 export function expandRecursive(node, depth = 2, username) {
@@ -107,5 +120,13 @@ export function resetNodeOverride(node, username) {
   return requestJson(`/overrides/${encodeURIComponent(node)}`, {
     method: 'DELETE',
     headers: userHeaders(username),
+  });
+}
+
+export function publishNodeOverride(node, username) {
+  return requestJson('/admin-change-requests', {
+    method: 'POST',
+    headers: userHeaders(username),
+    body: JSON.stringify({ node }),
   });
 }

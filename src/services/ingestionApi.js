@@ -2,7 +2,7 @@ const INGESTION_STORAGE_KEY = 'ontology-explorer-ingestion-jobs';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 function shouldUseMock() {
-  return import.meta.env.VITE_USE_MOCK_INGESTION === 'true' || !API_BASE_URL;
+  return import.meta.env.VITE_USE_MOCK_INGESTION === 'true';
 }
 
 async function requestJson(path, options = {}) {

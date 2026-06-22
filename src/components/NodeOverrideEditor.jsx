@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   getNodeOverride,
+  publishNodeOverride,
   resetNodeOverride,
   saveNodeOverride,
 } from '../services/ontologyApi.js';
@@ -13,6 +14,7 @@ export default function NodeOverrideEditor({ node, username, onChanged }) {
   const [relationshipAction, setRelationshipAction] = useState('add');
   const [override, setOverride] = useState(emptyOverride);
   const [isSaving, setIsSaving] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -84,6 +86,19 @@ export default function NodeOverrideEditor({ node, username, onChanged }) {
     }
   }
 
+  async function handlePublish() {
+    setIsPublishing(true);
+    setMessage('');
+    try {
+      await publishNodeOverride(node.id, username);
+      setMessage('Request sent to admin for review.');
+    } catch (error) {
+      setMessage(error.message || 'Unable to publish request.');
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
   const hasOverride = Boolean(
     override.label || override.added_neighbors?.length || override.removed_neighbors?.length
   );
@@ -118,6 +133,14 @@ export default function NodeOverrideEditor({ node, username, onChanged }) {
           Reset
         </button>
       </div>
+      <button
+        className="secondary-button publish-button"
+        type="button"
+        disabled={isSaving || isPublishing || !hasOverride}
+        onClick={handlePublish}
+      >
+        {isPublishing ? 'Publishing' : 'Publish to Admin'}
+      </button>
       {message ? <p className="override-message">{message}</p> : null}
     </form>
   );

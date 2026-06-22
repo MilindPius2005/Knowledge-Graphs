@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { expandNode, expandRecursive, searchNodes, filterEmployees } from '../services/ontologyApi.js';
+import { expandNode, searchNodes, filterEmployees } from '../services/ontologyApi.js';
 import { recordEvent } from '../services/eventsApi.js';
 
 function getNodeId(value) {
@@ -30,11 +30,55 @@ function getConnectedCount(graph, selectedNode) {
     .length;
 }
 
+function hasValue(value) {
+  if (typeof value === 'boolean') return value;
+  return Boolean(String(value ?? '').trim());
+}
+
+function normalizeGraph(data) {
+  return {
+    nodes: Array.isArray(data?.nodes) ? data.nodes : [],
+    links: Array.isArray(data?.links) ? data.links : [],
+  };
+}
+
+function mergeGraphs(currentGraph, nextGraph) {
+  const nodeMap = new Map();
+  const linkMap = new Map();
+
+  [...(currentGraph.nodes || []), ...(nextGraph.nodes || [])].forEach((node) => {
+    nodeMap.set(node.id, { ...(nodeMap.get(node.id) || {}), ...node });
+  });
+
+  [...(currentGraph.links || []), ...(nextGraph.links || [])].forEach((link) => {
+    const source = getNodeId(link.source);
+    const target = getNodeId(link.target);
+    if (!source || !target) return;
+    linkMap.set(`${source}->${target}`, { source, target });
+  });
+
+  return {
+    nodes: Array.from(nodeMap.values()),
+    links: Array.from(linkMap.values()),
+  };
+}
+
 export function useOntologyExplorer(username) {
   const [graph, setGraph] = useState({ nodes: [], links: [] });
   const [rootNode, setRootNode] = useState('');
   const [selectedNode, setSelectedNode] = useState(null);
-  const [recursiveMode, setRecursiveMode] = useState(false);
+  const [expandedNodeIds, setExpandedNodeIds] = useState(() => new Set());
+  const [filters, setFilters] = useState({
+    ssl: false,
+    benchMin: '',
+    benchMax: '',
+    clientName: '',
+    deploymentStatus: '',
+    employee: '',
+    performanceManager: '',
+    skillGroup: '',
+    skill: '',
+  });
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,22 +93,16 @@ export function useOntologyExplorer(username) {
       const cleanNode = nodeId.trim();
       if (!cleanNode) return;
 
-      const useRecursive = options.recursiveMode ?? recursiveMode;
       setIsLoading(true);
       setError('');
 
       try {
-        const data = useRecursive
-          ? await expandRecursive(cleanNode, 2, username)
-          : await expandNode(cleanNode, username);
-
-        const normalizedGraph = {
-          nodes: Array.isArray(data?.nodes) ? data.nodes : [],
-          links: Array.isArray(data?.links) ? data.links : [],
-        };
+        const data = await expandNode(cleanNode, username);
+        const normalizedGraph = normalizeGraph(data);
 
         setGraph(normalizedGraph);
         setRootNode(normalizedGraph.nodes[0]?.id || cleanNode);
+        setExpandedNodeIds(new Set([normalizedGraph.nodes[0]?.id || cleanNode]));
 
         setSelectedNode(
           data.nodes.find((node) => String(node.id).toLowerCase() === cleanNode.toLowerCase()) ||
@@ -75,7 +113,7 @@ export function useOntologyExplorer(username) {
         if (options.pushHistory !== false) {
           setHistory((current) => {
             const next = current.slice(0, historyIndex + 1);
-            next.push({ nodeId: cleanNode, recursiveMode: useRecursive });
+            next.push({ nodeId: cleanNode });
             return next;
           });
           setHistoryIndex((index) => index + 1);
@@ -84,7 +122,7 @@ export function useOntologyExplorer(username) {
         recordEvent({
           type: 'graph_expanded',
           nodeId: cleanNode,
-          recursiveMode: useRecursive,
+          recursiveMode: false,
           nodeCount: normalizedGraph.nodes.length,
           linkCount: normalizedGraph.links.length,
         }).catch(() => {});
@@ -94,21 +132,34 @@ export function useOntologyExplorer(username) {
         setIsLoading(false);
       }
     },
-    [historyIndex, recursiveMode, username]
+    [historyIndex, username]
   );
 
-  const handleSearch = useCallback(async (queryOrFilters) => {
+  const handleSearch = useCallback(async (query = '') => {
     setIsSearching(true);
     setError('');
     setPendingGraphRoot(null);
+    setGraph({ nodes: [], links: [] });
+    setRootNode('');
+    setSelectedNode(null);
+    setExpandedNodeIds(new Set());
+    setHistory([]);
+    setHistoryIndex(-1);
 
     try {
-      // Support both legacy free-text search (string) and new filter search (object).
-      if (typeof queryOrFilters === 'string') {
-        const cleanQuery = queryOrFilters.trim();
-        if (!cleanQuery) return;
+      const cleanQuery = query.trim();
+      const activeFilters = {
+        ...filters,
+        ssl: filters.ssl ? 'true' : '',
+        query: cleanQuery || undefined,
+      };
+      const hasActiveFilters = Object.values(activeFilters).some(hasValue);
+      const hasSidebarFilters = Object.values(filters).some(hasValue);
 
-        const results = await searchNodes(cleanQuery);
+      if (!hasActiveFilters) return;
+
+      if (cleanQuery && !hasSidebarFilters) {
+        const results = await searchNodes(cleanQuery, username);
         setSearchResults(results);
         setPendingGraphRoot(results[0]?.id ?? null);
         recordEvent({
@@ -119,14 +170,13 @@ export function useOntologyExplorer(username) {
         return;
       }
 
-      // Filter-based search: AND logic handled by mock/backend.
-      const results = await filterEmployees(queryOrFilters);
+      const results = await filterEmployees(activeFilters, username);
       setSearchResults(results);
       setPendingGraphRoot(results[0]?.id ?? null);
 
       recordEvent({
         type: 'filter_search_performed',
-        filters: queryOrFilters,
+        filters: activeFilters,
         resultCount: results.length,
       }).catch(() => {});
     } catch (requestError) {
@@ -134,11 +184,51 @@ export function useOntologyExplorer(username) {
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [filters, username]);
 
   const selectSearchResult = useCallback((result) => {
     setPendingGraphRoot(result?.id ?? null);
   }, []);
+
+  const expandNodeInGraph = useCallback(
+    async (nodeId) => {
+      const cleanNode = String(nodeId || '').trim();
+      if (!cleanNode) return;
+
+      if (expandedNodeIds.has(cleanNode)) {
+        setSelectedNode((current) => {
+          if (current?.id === cleanNode) return current;
+          return graph.nodes.find((node) => node.id === cleanNode) || { id: cleanNode, label: cleanNode, type: 'Unknown' };
+        });
+        return;
+      }
+
+      setIsLoading(true);
+      setError('');
+
+      try {
+        const data = await expandNode(cleanNode, username);
+        const nextGraph = normalizeGraph(data);
+
+        setGraph((currentGraph) => mergeGraphs(currentGraph, nextGraph));
+        setExpandedNodeIds((current) => new Set([...current, cleanNode]));
+        setSelectedNode(nextGraph.nodes.find((node) => node.id === cleanNode) || null);
+
+        recordEvent({
+          type: 'graph_expanded',
+          nodeId: cleanNode,
+          recursiveMode: false,
+          nodeCount: nextGraph.nodes.length,
+          linkCount: nextGraph.links.length,
+        }).catch(() => {});
+      } catch (requestError) {
+        setError(requestError.message || 'Unable to expand ontology node.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [expandedNodeIds, graph.nodes, username]
+  );
 
   const generateKnowledgeGraph = useCallback(() => {
     if (!pendingGraphRoot) return;
@@ -146,23 +236,21 @@ export function useOntologyExplorer(username) {
     setError('');
     setSearchResults([]);
     setPendingGraphRoot(null);
-    loadGraph(graphRoot, { recursiveMode: false });
+    loadGraph(graphRoot);
   }, [loadGraph, pendingGraphRoot]);
 
   const expandSelected = useCallback(() => {
     if (selectedNode) {
-      loadGraph(selectedNode.id);
+      expandNodeInGraph(selectedNode.id);
     }
-  }, [loadGraph, selectedNode]);
+  }, [expandNodeInGraph, selectedNode]);
 
   const goBack = useCallback(() => {
     if (historyIndex <= 0) return;
     const nextIndex = historyIndex - 1;
     const entry = history[nextIndex];
     setHistoryIndex(nextIndex);
-    setRecursiveMode(entry.recursiveMode);
     loadGraph(entry.nodeId, {
-      recursiveMode: entry.recursiveMode,
       pushHistory: false,
     });
   }, [history, historyIndex, loadGraph]);
@@ -172,9 +260,7 @@ export function useOntologyExplorer(username) {
     const nextIndex = historyIndex + 1;
     const entry = history[nextIndex];
     setHistoryIndex(nextIndex);
-    setRecursiveMode(entry.recursiveMode);
     loadGraph(entry.nodeId, {
-      recursiveMode: entry.recursiveMode,
       pushHistory: false,
     });
   }, [history, historyIndex, loadGraph]);
@@ -188,13 +274,19 @@ export function useOntologyExplorer(username) {
     [graph, selectedNode]
   );
 
+  const rootDisplayName = useMemo(() => {
+    const root = graph.nodes.find((node) => node.id === rootNode);
+    return root?.label || rootNode;
+  }, [graph.nodes, rootNode]);
+
   return {
     graph,
     rootNode,
+    rootDisplayName,
     selectedNode,
     selectedDetails,
     pendingGraphRoot,
-    recursiveMode,
+    filters,
     isLoading,
     isSearching,
     searchResults,
@@ -202,8 +294,9 @@ export function useOntologyExplorer(username) {
     canGoBack: historyIndex > 0,
     canGoForward: historyIndex < history.length - 1,
     setSelectedNode,
-    setRecursiveMode,
+    setFilters,
     loadGraph,
+    expandNodeInGraph,
     handleSearch,
     selectSearchResult,
     expandSelected,

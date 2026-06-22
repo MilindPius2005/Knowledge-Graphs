@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import SearchBar from '../components/SearchBar.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import OntologyGraph from '../components/OntologyGraph.jsx';
 import GraphControls from '../components/GraphControls.jsx';
@@ -37,7 +36,7 @@ export default function ExplorerPage({ user, onLogout }) {
           selectedNode={explorer.selectedNode}
           rootNode={explorer.rootNode}
           onNodeSelect={explorer.setSelectedNode}
-          onNodeExpand={(node) => explorer.loadGraph(node.id)}
+          onNodeExpand={(node) => explorer.expandNodeInGraph(node.id)}
           isLoading={explorer.isLoading}
         />
       </div>
@@ -48,8 +47,19 @@ export default function ExplorerPage({ user, onLogout }) {
     <main className="app-shell">
       <Sidebar
         selectedDetails={explorer.selectedDetails}
-        recursiveMode={explorer.recursiveMode}
-        onRecursiveModeChange={explorer.setRecursiveMode}
+        filters={explorer.filters}
+        onFiltersChange={explorer.setFilters}
+        searchProps={{
+          onSearch: explorer.handleSearch,
+          onSelectResult: explorer.selectSearchResult,
+          isLoading: explorer.isLoading,
+          isSearching: explorer.isSearching,
+          rootNode: explorer.rootDisplayName,
+          results: explorer.searchResults,
+          pendingGraphRoot: explorer.pendingGraphRoot,
+          onGenerateKnowledgeGraph: explorer.generateKnowledgeGraph,
+          hasPendingResult: Boolean(explorer.pendingGraphRoot),
+        }}
         rootNode={explorer.rootNode}
         graph={explorer.graph}
         username={user.email}
@@ -64,19 +74,6 @@ export default function ExplorerPage({ user, onLogout }) {
         <header className="topbar">
           <div className="topbar-main">
             <AppNavigation activeView={activeView} onViewChange={setActiveView} user={user} />
-            {activeView === 'explorer' ? (
-              <SearchBar
-                onSearch={explorer.handleSearch}
-                onSelectResult={explorer.selectSearchResult}
-                isLoading={explorer.isLoading}
-                isSearching={explorer.isSearching}
-                rootNode={explorer.rootNode}
-                results={explorer.searchResults}
-                pendingGraphRoot={explorer.pendingGraphRoot}
-                onGenerateKnowledgeGraph={explorer.generateKnowledgeGraph}
-                hasPendingResult={Boolean(explorer.pendingGraphRoot)}
-              />
-            ) : null}
           </div>
           {explorer.error ? <div className="error-banner">{explorer.error}</div> : null}
         </header>

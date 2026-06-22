@@ -2,7 +2,7 @@ const EVENTS_STORAGE_KEY = 'ontology-explorer-events';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 function shouldUseMock() {
-  return import.meta.env.VITE_USE_MOCK_EVENTS === 'true' || !API_BASE_URL;
+  return import.meta.env.VITE_USE_MOCK_EVENTS === 'true';
 }
 
 async function requestJson(path, options = {}) {

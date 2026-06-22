@@ -1,4 +1,6 @@
 import NodeOverrideEditor from './NodeOverrideEditor.jsx';
+import DatasetFilters from './DatasetFilters.jsx';
+import SearchBar from './SearchBar.jsx';
 
 const typeLabels = {
   Employee: 'Employee',
@@ -11,8 +13,9 @@ const typeLabels = {
 
 export default function Sidebar({
   selectedDetails,
-  recursiveMode,
-  onRecursiveModeChange,
+  filters,
+  onFiltersChange,
+  searchProps,
   rootNode,
   graph,
   username,
@@ -30,25 +33,14 @@ export default function Sidebar({
         </div>
       </div>
 
-      <section className="sidebar-section">
-        <div className="section-heading">Expansion</div>
-        <div className="mode-toggle" role="group" aria-label="Expansion mode">
-          <button
-            type="button"
-            className={!recursiveMode ? 'active' : ''}
-            onClick={() => onRecursiveModeChange(false)}
-          >
-            Normal
-          </button>
-          <button
-            type="button"
-            className={recursiveMode ? 'active' : ''}
-            onClick={() => onRecursiveModeChange(true)}
-          >
-            Recursive
-          </button>
-        </div>
-      </section>
+      {searchProps ? (
+        <section className="sidebar-section sidebar-search-section">
+          <div className="section-heading">Search</div>
+          <SearchBar {...searchProps} />
+        </section>
+      ) : null}
+
+      <DatasetFilters filters={filters} onFiltersChange={onFiltersChange} />
 
       <section className="sidebar-section">
         <div className="section-heading">Selected Node</div>
