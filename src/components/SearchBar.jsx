@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 
 export default function SearchBar({
+  query = '',
+  onQueryChange,
   onSearch,
   onSelectResult,
   onGenerateKnowledgeGraph,
@@ -11,12 +13,6 @@ export default function SearchBar({
   pendingGraphRoot,
   hasPendingResult,
 }) {
-  const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    if (rootNode) setQuery(rootNode);
-  }, [rootNode]);
-
   function handleSubmit(event) {
     event.preventDefault();
     onSearch(query);
@@ -31,7 +27,7 @@ export default function SearchBar({
             type="text"
             value={query}
             placeholder="Search employees, skills, labels..."
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => onQueryChange(event.target.value)}
             aria-label="Search ontology"
           />
         </div>

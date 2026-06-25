@@ -21,12 +21,18 @@ except ImportError:
     PyMongoError = Exception
     ServerSelectionTimeoutError = Exception
 
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 app = Flask(__name__)
 OVERRIDES_PATH = Path(__file__).with_name("ontology_overrides.json")
 ADMIN_REQUESTS_PATH = Path(__file__).with_name("ontology_admin_requests.json")
 overrides_lock = Lock()
 runtime_events = []
 runtime_ingestion_jobs = []
+runtime_upload_history = []
 runtime_users = []
 runtime_sessions = {}
 
@@ -37,10 +43,40 @@ NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "super4j")
 
-from employees_dataset import DATASET
+# Schema that uploaded files must match exactly (case-sensitive).
+EXPECTED_COLUMNS = [
+    "Emp_Name", "Client_Name", "Project", "Current_Performance",
+    "KPMG_Level", "Q_Rating", "Mobile", "Skills",
+    "misc skill", "module", "skillgroup", "LH function",
+    "performance unit", "april utilization", "may utilization",
+    "YTD utilization", "nextcumulative available data",
+    "level", "bench ageing", "campus/lateral"
+]
 
-
-
+# Maps CSV/Excel column names → Neo4j node labels so that the ontology
+# can recognise nodes by type (e.g. filter by Employee, Client, Skill).
+COLUMN_LABEL_MAP = {
+    "Emp_Name":                   "Employee",
+    "Client_Name":                "Client",
+    "Project":                    "Project",
+    "Current_Performance":        "Performance",
+    "KPMG_Level":                 "Level",
+    "Q_Rating":                   "Rating",
+    "Mobile":                     "Mobile",
+    "Skills":                     "Skill",
+    "misc skill":                 "Skill",
+    "module":                     "Module",
+    "skillgroup":                 "SkillGroup",
+    "LH function":                "LHFunction",
+    "performance unit":           "PerformanceUnit",
+    "april utilization":          "Utilization",
+    "may utilization":            "Utilization",
+    "YTD utilization":            "Utilization",
+    "nextcumulative available data": "Availability",
+    "level":                      "Level",
+    "bench ageing":               "BenchAging",
+    "campus/lateral":             "CampusLateral",
+}
 
 
 def now_iso():
@@ -171,8 +207,8 @@ def load_graph_dataset_from_neo4j():
             driver.close()
 
 
-EMPLOYEES = load_graph_dataset_from_neo4j() or DATASET["employees"]
-GRAPH_SOURCE = "neo4j" if EMPLOYEES is not DATASET["employees"] else "sample"
+EMPLOYEES = load_graph_dataset_from_neo4j() or []
+GRAPH_SOURCE = "neo4j" if EMPLOYEES else "empty"
 EMPLOYEE_META = {row["Emp_Name"]: row for row in EMPLOYEES}
 
 
@@ -214,7 +250,9 @@ def build_ontology(rows):
 
 
 ontology = build_ontology(EMPLOYEES)
-
+# Maps (source_name, target_name) → relationship type label e.g. "HAS_SKILL"
+# Populated at startup and after every upload by _rebuild_ontology_from_neo4j()
+ONTOLOGY_EDGES = {}
 
 def find_canonical_node_name(node_name: str):
     if not isinstance(node_name, str):
@@ -396,7 +434,12 @@ def generate_graph(node_name, username=""):
 
         links.append({
             "source": canonical_name,
-            "target": neighbor
+            "target": neighbor,
+            "relType": (
+                ONTOLOGY_EDGES.get((canonical_name, neighbor))
+                or ONTOLOGY_EDGES.get((neighbor, canonical_name))
+                or ""
+            )
         })
 
     return {
@@ -428,12 +471,12 @@ def expand_recursive(node_name, depth, username=""):
         if not node_data:
             return
 #[{},{}]
+
         if current_node not in node_ids:
             node_ids.add(current_node)
             nodes.append(serialize_graph_node(current_node, username))
 
         for neighbor in node_data["neighbors"]:
-
             neighbor_data = effective_node(neighbor, username)
             if not neighbor_data:
                 continue
@@ -442,7 +485,15 @@ def expand_recursive(node_name, depth, username=""):
                 node_ids.add(neighbor)
                 nodes.append(serialize_graph_node(neighbor, username))
 
-            links.append({"source": current_node, "target": neighbor})
+            links.append({
+                "source": current_node,
+                "target": neighbor,
+                "relType": (
+                    ONTOLOGY_EDGES.get((current_node, neighbor))
+                    or ONTOLOGY_EDGES.get((neighbor, current_node))
+                    or ""
+                )
+            })
 
             dfs(neighbor, current_depth + 1)
 
@@ -471,9 +522,10 @@ def serialize_search_result(name, username=""):
         "description": f"{node_type} node" if label == name else f"{node_type} node, originally {name}"
     }
     if node_type == "Employee":
-        row = EMPLOYEE_META.get(name, {})
-        result["deploymentStatus"] = row.get("Deployment_Status", "")
-        result["description"] = f"{row.get('SS', 'Employee')} - {row.get('Deployment_Status', 'Unknown')}"
+        profile = employee_profile(name)
+        result["deploymentStatus"] = profile["deployment_status"].capitalize()
+        dept = "Lighthouse" if profile["ssl"] else "Employee"
+        result["description"] = f"{dept} - {profile['deployment_status'].capitalize()}"
     return result
 
 
@@ -550,26 +602,64 @@ def attach_session_cookie(response, session_id):
     return response
 
 
+def connected_neighbor_of_type(node_name, target_type):
+    for neighbor in ontology.get(node_name, {}).get("neighbors", []):
+        if ontology.get(neighbor, {}).get("type") == target_type:
+            return neighbor
+    return ""
+
+
 def employee_profile(employee_name):
-    row = EMPLOYEE_META.get(employee_name, {})
-    skills = [
-        neighbor for neighbor in ontology.get(employee_name, {}).get("neighbors", [])
-        if ontology.get(neighbor, {}).get("type") == "Skill"
-    ]
-    skill_group = "Leadership" if "Management" in skills else "Technical" if skills else "General"
-    bench_days = 0 if row.get("Bench") != "Yes" else (sum(ord(char) for char in employee_name) % 120)
+    # 1. client_name
+    client_name = connected_neighbor_of_type(employee_name, "Client") or "Unassigned"
+
+    # 2. skill_group
+    skill_group = connected_neighbor_of_type(employee_name, "SkillGroup") or "General"
+
+    # 3. bench_aging
+    bench_aging_str = connected_neighbor_of_type(employee_name, "BenchAging")
+    try:
+        bench_aging = int(float(bench_aging_str)) if bench_aging_str else 0
+    except (ValueError, TypeError):
+        bench_aging = 0
+
+    # 4. deployment_status
+    client_lower = client_name.lower()
+    if bench_aging > 0 or client_lower in ("unassigned", "bench", ""):
+        deployment_status = "available"
+    else:
+        deployment_status = "deployed"
+
+    # 5. performance_manager (PerformanceUnit)
+    performance_manager = connected_neighbor_of_type(employee_name, "PerformanceUnit") or "Unassigned"
+
+    # 6. ssl (Lighthouse function)
+    lh_function = connected_neighbor_of_type(employee_name, "LHFunction")
+    ssl = bool(lh_function)
+
+    # 7. level
+    level = connected_neighbor_of_type(employee_name, "Level")
+
+    # 8. performance
+    performance = connected_neighbor_of_type(employee_name, "Performance")
+
+    # 9. utilization
+    utilization_str = connected_neighbor_of_type(employee_name, "Utilization")
+    try:
+        utilization = int(float(utilization_str)) if utilization_str else 0
+    except (ValueError, TypeError):
+        utilization = 0
+
     return {
         "employee": employee_name,
-        "ssl": str(row.get("SS", "")).upper().startswith("SSL") or row.get("SST") == "LH",
-        "bench_aging": bench_days,
-        "client_name": row.get("Client_Name", "Unassigned"),
-        "deployment_status": row.get("Deployment_Status", "Available").lower(),
-        "performance_manager": row.get("RM_Remarks", "Unassigned"),
-        "level": row.get("KPMG_Level", ""),
-        "performance": row.get("Current_Performance", ""),
-        "utilization": row.get("YTD_Util", 0),
-        "util_gap": row.get("Util_Gap", 0),
-        "ug_flag": row.get("UG_Flag", ""),
+        "ssl": ssl,
+        "bench_aging": bench_aging,
+        "client_name": client_name,
+        "deployment_status": deployment_status,
+        "performance_manager": performance_manager,
+        "level": level,
+        "performance": performance,
+        "utilization": utilization,
         "skill_group": skill_group,
     }
 
@@ -588,6 +678,15 @@ def write_admin_requests(data):
     temporary_path = ADMIN_REQUESTS_PATH.with_suffix(".tmp")
     temporary_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     temporary_path.replace(ADMIN_REQUESTS_PATH)
+
+
+@app.before_request
+def auto_rebuild_ontology():
+    """Automatically rebuild the ontology cache from Neo4j before serving any request."""
+    try:
+        _rebuild_ontology_from_neo4j()
+    except Exception:
+        pass
 
 
 @app.after_request
@@ -743,12 +842,15 @@ def home():
 
 @app.route("/expand/<path:node>", methods=["GET", "POST"])
 def expand(node):
+    if len(ontology) == 0:
+        return "Database is empty", 400
     graph = generate_graph(node, request_username())
     return jsonify(graph), 404 if graph.get("error") else 200
 
 @app.route("/expand_recursive/<path:node>/<int:depth>")
-
 def recursive(node, depth):
+    if len(ontology) == 0:
+        return "Database is empty", 400
     canonical_name = find_effective_node_name(node, request_username())
     if not canonical_name:
         return jsonify({"nodes": [], "links": [], "error": f"Node '{node}' not found"}), 404
@@ -819,11 +921,10 @@ def search():
         return jsonify({"results": []})
 
     def row_matches(name):
-        row = EMPLOYEE_META.get(name, {})
-        values = []
-        for value in row.values():
-            values.extend(value if isinstance(value, list) else [value])
-        return any(query in str(value).lower() for value in values)
+        if ontology.get(name, {}).get("type") != "Employee":
+            return False
+        profile = employee_profile(name)
+        return any(query in str(value).lower() for value in profile.values())
 
     matches = [
         serialize_search_result(name, username)
@@ -848,6 +949,8 @@ def skills():
 
 @app.route("/employees")
 def employees():
+    if len(ontology) == 0:
+        return "Database is empty", 400
     username = request_username()
     query_filter = request.args.get("query", "").strip().lower()
     name_filter = request.args.get("name", "").strip().lower()
@@ -938,19 +1041,36 @@ def employees():
 
 @app.route("/filter-options")
 def filter_options():
-    profiles = [employee_profile(name) for name in node_names_by_type("Employee")]
+    if len(ontology) == 0:
+        return "Database is empty", 400
+    employees = node_names_by_type("Employee")
+    clients   = sorted(node_names_by_type("Client"))
+    skills    = sorted(node_names_by_type("Skill"))
+    skill_groups = sorted(node_names_by_type("SkillGroup"))
+    projects  = sorted(node_names_by_type("Project"))
+
+    # Build bench aging range from BenchAging nodes (numeric name values)
+    bench_vals = []
+    for name in node_names_by_type("BenchAging"):
+        try:
+            bench_vals.append(float(name))
+        except (ValueError, TypeError):
+            pass
+
     return jsonify({
-        "clients": sorted({profile["client_name"] for profile in profiles}),
+        "clients": clients,
         "deploymentStatuses": ["available", "deployed"],
-        "employees": node_names_by_type("Employee"),
-        "performanceManagers": sorted({profile["performance_manager"] for profile in profiles}),
-        "skillGroups": sorted({profile["skill_group"] for profile in profiles}),
-        "skills": node_names_by_type("Skill"),
+        "employees": employees,
+        "performanceManagers": sorted(node_names_by_type("PerformanceUnit")),
+        "skillGroups": skill_groups,
+        "skills": skills,
+        "projects": projects,
         "benchAging": {
-            "min": min(profile["bench_aging"] for profile in profiles),
-            "max": max(profile["bench_aging"] for profile in profiles),
+            "min": int(min(bench_vals)) if bench_vals else 0,
+            "max": int(max(bench_vals)) if bench_vals else 0,
         },
     })
+
 
 
 @app.route("/admin-change-requests", methods=["POST"])
@@ -975,9 +1095,293 @@ def admin_change_request():
     write_admin_requests(requests)
     return jsonify({"ok": True, "request": request_record})
 
+
+# ─────────────────────────────────────────────────────────────
+# Document Upload & Neo4j Ingestion
+# ─────────────────────────────────────────────────────────────
+
+def _parse_uploaded_file(file_storage):
+    """Parse CSV, Excel or JSON file into a list of row dicts."""
+    filename = file_storage.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext == "json":
+        try:
+            raw = json.loads(file_storage.read().decode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Invalid JSON: {exc}")
+        if isinstance(raw, dict):
+            raw = [raw]
+        if not isinstance(raw, list):
+            raise ValueError("JSON must be an array or object.")
+        return raw
+
+    if ext in ("csv", "xlsx", "xls"):
+        if pd is None:
+            raise RuntimeError("pandas is not installed. Run: pip install pandas openpyxl")
+        try:
+            if ext == "csv":
+                df = pd.read_csv(file_storage)
+            else:
+                df = pd.read_excel(file_storage, engine="openpyxl")
+        except Exception as exc:
+            raise ValueError(f"Could not parse file: {exc}")
+        if df.empty or len(df.columns) == 0:
+            raise ValueError("File is empty or has no columns.")
+        df.dropna(how="all", inplace=True)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df.to_dict(orient="records")
+
+    raise ValueError(f"Unsupported file type: .{ext}. Use CSV, XLSX, XLS or JSON.")
+
+
+def _ingest_rows_to_neo4j(rows):
+    """
+    Convert a list of row-dicts into Neo4j nodes + relationships.
+    Rules:
+      - Column 0  → primary entity  (label = COLUMN_LABEL_MAP lookup, default = column name)
+      - Columns 1+ → related entities (label = COLUMN_LABEL_MAP lookup, default = column name)
+      - Relationship type = column name uppercased with spaces→underscores
+    Returns (nodes_created, relationships_created).
+    """
+    if GraphDatabase is None:
+        raise RuntimeError("neo4j driver not installed.")
+    if not rows:
+        return 0, 0
+
+    columns = list(rows[0].keys())
+    if not columns:
+        raise ValueError("No columns found in data.")
+
+    primary_col = columns[0]
+    primary_label = COLUMN_LABEL_MAP.get(primary_col, primary_col)
+    nodes_merged = set()
+    rels_merged = set()
+
+    driver = GraphDatabase.driver(
+        NEO4J_URI,
+        auth=(NEO4J_USER, NEO4J_PASSWORD),
+        connection_timeout=5,
+    )
+    try:
+        with driver.session(database=NEO4J_DATABASE) as session:
+            for row in rows:
+                primary_val = str(row.get(columns[0], "")).strip()
+                if not primary_val:
+                    continue
+
+                # MERGE primary node using the mapped label (e.g. "Employee")
+                session.run(
+                    f"MERGE (n:`{primary_label}` {{name: $name}})",
+                    name=primary_val,
+                )
+                nodes_merged.add((primary_label, primary_val))
+
+                for col in columns[1:]:
+                    cell_val = str(row.get(col, "")).strip()
+                    if not cell_val or cell_val.lower() in ("nan", "none", ""):
+                        continue
+
+                    rel_type = col.upper().replace(" ", "_").replace("-", "_").replace("/", "_")
+                    col_label = COLUMN_LABEL_MAP.get(col, col.strip())
+
+                    # MERGE related node using the mapped label
+                    session.run(
+                        f"MERGE (n:`{col_label}` {{name: $name}})",
+                        name=cell_val,
+                    )
+                    nodes_merged.add((col_label, cell_val))
+
+                    # MERGE relationship
+                    session.run(
+                        f"""
+                        MATCH (a:`{primary_label}` {{name: $primary}})
+                        MATCH (b:`{col_label}` {{name: $related}})
+                        MERGE (a)-[:`{rel_type}`]->(b)
+                        """,
+                        primary=primary_val,
+                        related=cell_val,
+                    )
+                    rels_merged.add((primary_val, rel_type, cell_val))
+    finally:
+        driver.close()
+
+    return len(nodes_merged), len(rels_merged)
+
+
+def _rebuild_ontology_from_neo4j():
+    """Re-read the full graph from Neo4j and rebuild the in-memory ontology."""
+    global ontology, EMPLOYEES, EMPLOYEE_META, GRAPH_SOURCE, ONTOLOGY_EDGES
+    fresh = load_graph_dataset_from_neo4j() or []
+    EMPLOYEES = fresh
+    EMPLOYEE_META = {row["Emp_Name"]: row for row in EMPLOYEES}
+    GRAPH_SOURCE = "neo4j" if EMPLOYEES else "empty"
+    ontology = build_ontology(EMPLOYEES)
+    ONTOLOGY_EDGES = {}
+
+    # Also pull ALL node labels from Neo4j to include uploaded non-Employee data
+    if GraphDatabase is None:
+        return
+    driver = None
+    try:
+        driver = GraphDatabase.driver(
+            NEO4J_URI,
+            auth=(NEO4J_USER, NEO4J_PASSWORD),
+            connection_timeout=5,
+        )
+        with driver.session(database=NEO4J_DATABASE) as session:
+            result = session.run(
+                """
+                MATCH (n)
+                OPTIONAL MATCH (n)-[r]->(m)
+                RETURN labels(n) AS labels, n.name AS name,
+                       collect({type: type(r), target: m.name, targetLabels: labels(m)}) AS rels
+                """
+            )
+            for record in result:
+                name = record["name"]
+                if not name:
+                    continue
+                labels = record["labels"] or []
+                node_type = labels[0] if labels else "Unknown"
+                if name not in ontology:
+                    ontology[name] = {"type": node_type, "neighbors": []}
+                for rel in (record["rels"] or []):
+                    target = rel.get("target")
+                    rel_type = rel.get("type") or ""
+                    if target and target not in ontology[name]["neighbors"]:
+                        ontology[name]["neighbors"].append(target)
+                    if target and target not in ontology:
+                        tl = (rel.get("targetLabels") or ["Unknown"])
+                        ontology[target] = {"type": tl[0], "neighbors": []}
+                    if target and name not in ontology[target]["neighbors"]:
+                        ontology[target]["neighbors"].append(name)
+                    # Store the relationship type for edge label display
+                    if target and rel_type:
+                        ONTOLOGY_EDGES[(name, target)] = rel_type
+    except Exception:
+        pass
+    finally:
+        if driver:
+            driver.close()
+
+
+@app.route("/ingestion/upload", methods=["POST"])
+def ingestion_upload():
+    """Accept a CSV/XLSX/XLS/JSON file, parse it, write to Neo4j super4j, refresh ontology."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file part in request. Send field name 'file'."}), 400
+
+    uploaded_file = request.files["file"]
+    if not uploaded_file.filename:
+        return jsonify({"error": "No file selected."}), 400
+
+    try:
+        rows = _parse_uploaded_file(uploaded_file)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    if not rows:
+        return jsonify({"error": "File is empty — no data rows found."}), 422
+
+    # Check headers present
+    uploaded_columns = list(rows[0].keys())
+    if not uploaded_columns:
+        return jsonify({"error": "Missing column headers in uploaded file."}), 422
+
+    expected_set = set(EXPECTED_COLUMNS)
+    uploaded_set = set(uploaded_columns)
+
+    missing = list(expected_set - uploaded_set)
+    extra = list(uploaded_set - expected_set)
+
+    if missing or extra:
+        return jsonify({
+            "status": "error",
+            "error": "Schema Validation Failed",
+            "missing_columns": missing,
+            "unexpected_columns": extra
+        }), 422
+
+
+    try:
+        nodes_count, rels_count = _ingest_rows_to_neo4j(rows)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception as exc:
+        return jsonify({"error": f"Neo4j write failed: {exc}"}), 500
+
+    # Rebuild ontology so data is immediately searchable
+    try:
+        _rebuild_ontology_from_neo4j()
+    except Exception:
+        pass  # Non-fatal; data is in Neo4j even if rebuild fails
+
+    filename = uploaded_file.filename
+    record = {
+        "id": str(uuid.uuid4()),
+        "filename": filename,
+        "uploadedAt": now_iso(),
+        "totalRows": len(rows),
+        "totalNodes": nodes_count,
+        "totalRelationships": rels_count,
+        "columns": list(rows[0].keys()),
+        "primaryEntity": list(rows[0].keys())[0] if rows else "",
+        "status": "completed",
+    }
+
+    # Persist to Mongo if available, else in-memory
+    uploads_col = mongo_collection("upload_history")
+    if uploads_col is not None:
+        uploads_col.insert_one(dict(record))
+    else:
+        runtime_upload_history.insert(0, record)
+        del runtime_upload_history[100:]
+
+    return jsonify(record), 200
+
+
+@app.route("/ingestion/uploads", methods=["GET"])
+def ingestion_uploads():
+    """List past document uploads."""
+    uploads_col = mongo_collection("upload_history")
+    if uploads_col is not None:
+        records = list(uploads_col.find({}, {"_id": 0}).sort("uploadedAt", -1).limit(50))
+    else:
+        records = list(runtime_upload_history)
+    return jsonify({"uploads": records})
+
+
+@app.route("/admin/refresh", methods=["POST"])
+def admin_refresh():
+    """Force a full re-read of Neo4j and rebuild the in-memory ontology.
+    Call this after clearing or modifying Neo4j externally."""
+    try:
+        _rebuild_ontology_from_neo4j()
+        return jsonify({
+            "ok": True,
+            "graphSource": GRAPH_SOURCE,
+            "nodeCount": len(ontology),
+            "employeeCount": len(EMPLOYEES),
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ── Startup: rebuild ontology + edge map from existing Neo4j data ────────────
+# This ensures ONTOLOGY_EDGES is populated even before the first upload.
+try:
+    _rebuild_ontology_from_neo4j()
+except Exception:
+    pass  # Neo4j may not be ready yet; each upload will retry
+
+
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",
         port=int(os.getenv("FLASK_PORT", "5001")),
         debug=False
     )
+

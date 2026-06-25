@@ -62,3 +62,46 @@ export async function listIngestionJobs() {
 
   return readJobs();
 }
+
+/**
+ * Upload a CSV / XLSX / XLS / JSON file to the backend.
+ * The backend parses it, writes nodes + relationships to Neo4j (super4j),
+ * and returns an import summary.
+ */
+export async function uploadDocument(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/ingestion/upload`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+    // Do NOT set Content-Type manually — browser sets it with boundary automatically
+  });
+
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`Upload failed with status ${response.status}`);
+  }
+
+  if (!response.ok) {
+    if (data?.missing_columns || data?.unexpected_columns) {
+      const err = new Error(data.error || 'Schema Validation Failed');
+      err.validationDetails = data;
+      throw err;
+    }
+    throw new Error(data?.error || `Upload failed with status ${response.status}`);
+  }
+
+  return data;
+}
+
+/**
+ * Fetch the list of previously uploaded documents.
+ */
+export async function listUploadHistory() {
+  const data = await requestJson('/ingestion/uploads');
+  return Array.isArray(data) ? data : data.uploads || [];
+}

@@ -20,6 +20,7 @@ export default defineConfig({
       '/auth': backendTarget,
       '/events': backendTarget,
       '/ingestion': backendTarget,
+
     },
   },
 });

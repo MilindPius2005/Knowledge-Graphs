@@ -11,11 +11,14 @@ import { useOntologyExplorer } from '../hooks/useOntologyExplorer.js';
 export default function ExplorerPage({ user, onLogout }) {
   const graphRef = useRef(null);
   const [activeView, setActiveView] = useState('explorer');
+  const [filterRefreshKey, setFilterRefreshKey] = useState(0);
   const explorer = useOntologyExplorer(user.email);
 
   function renderWorkspace() {
     if (activeView === 'events') return <EventsPanel />;
-    if (activeView === 'ingestion') return <IngestionPanel />;
+    if (activeView === 'ingestion') return (
+      <IngestionPanel onUploadSuccess={() => setFilterRefreshKey((k) => k + 1)} />
+    );
     if (activeView === 'user') return <UserPage user={user} onLogout={onLogout} />;
 
     return (
@@ -37,6 +40,8 @@ export default function ExplorerPage({ user, onLogout }) {
           rootNode={explorer.rootNode}
           onNodeSelect={explorer.setSelectedNode}
           onNodeExpand={(node) => explorer.expandNodeInGraph(node.id)}
+          onNodeCollapse={(node) => explorer.collapseNodeInGraph(node.id)}
+          expandedNodeIds={explorer.expandedNodeIds}
           isLoading={explorer.isLoading}
         />
       </div>
@@ -50,6 +55,8 @@ export default function ExplorerPage({ user, onLogout }) {
         filters={explorer.filters}
         onFiltersChange={explorer.setFilters}
         searchProps={{
+          query: explorer.searchQuery,
+          onQueryChange: explorer.setSearchQuery,
           onSearch: explorer.handleSearch,
           onSelectResult: explorer.selectSearchResult,
           isLoading: explorer.isLoading,
@@ -63,6 +70,7 @@ export default function ExplorerPage({ user, onLogout }) {
         rootNode={explorer.rootNode}
         graph={explorer.graph}
         username={user.email}
+        filterRefreshKey={filterRefreshKey}
         onOverrideChanged={() => {
           if (explorer.rootNode) {
             explorer.loadGraph(explorer.rootNode, { pushHistory: false });

@@ -20,6 +20,7 @@ export default function Sidebar({
   graph,
   username,
   onOverrideChanged,
+  filterRefreshKey,
 }) {
   const { node, connectedCount, parentNode } = selectedDetails;
 
@@ -40,7 +41,11 @@ export default function Sidebar({
         </section>
       ) : null}
 
-      <DatasetFilters filters={filters} onFiltersChange={onFiltersChange} />
+      <DatasetFilters
+        filters={filters}
+        onFiltersChange={onFiltersChange}
+        refreshKey={filterRefreshKey}
+      />
 
       <section className="sidebar-section">
         <div className="section-heading">Selected Node</div>

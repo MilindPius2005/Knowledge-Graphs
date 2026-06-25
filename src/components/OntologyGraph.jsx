@@ -2,13 +2,25 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as d3 from 'd3';
 
 const NODE_STYLES = {
-  Employee: { color: '#58a6ff', radius: 18 },
-  Department: { color: '#a78bfa', radius: 15 },
-  Skill: { color: '#36d399', radius: 13 },
-  Certification: { color: '#f6c85f', radius: 12 },
-  Organization: { color: '#ff7a90', radius: 16 },
-  Company: { color: '#2dd4bf', radius: 16 },
-  default: { color: '#94a3b8', radius: 12 },
+  Employee:       { color: '#58a6ff', radius: 18 },
+  Department:     { color: '#a78bfa', radius: 15 },
+  Skill:          { color: '#36d399', radius: 13 },
+  SkillGroup:     { color: '#34d399', radius: 13 },
+  Certification:  { color: '#f6c85f', radius: 12 },
+  Organization:   { color: '#ff7a90', radius: 16 },
+  Company:        { color: '#2dd4bf', radius: 16 },
+  Client:         { color: '#fb923c', radius: 15 },
+  Project:        { color: '#e879f9', radius: 14 },
+  Performance:    { color: '#facc15', radius: 12 },
+  Level:          { color: '#67e8f9', radius: 12 },
+  Module:         { color: '#a3e635', radius: 12 },
+  LHFunction:     { color: '#f472b6', radius: 12 },
+  PerformanceUnit:{ color: '#818cf8', radius: 12 },
+  Utilization:    { color: '#94a3b8', radius: 11 },
+  Availability:   { color: '#86efac', radius: 11 },
+  BenchAging:     { color: '#fbbf24', radius: 11 },
+  CampusLateral:  { color: '#c084fc', radius: 11 },
+  default:        { color: '#94a3b8', radius: 12 },
 };
 
 function getStyle(type) {
@@ -94,7 +106,7 @@ function buildStructuredLayout(nodes, links, rootNode, width, height) {
 }
 
 const OntologyGraph = forwardRef(function OntologyGraph(
-  { graph, selectedNode, rootNode, onNodeSelect, onNodeExpand, isLoading },
+  { graph, selectedNode, rootNode, onNodeSelect, onNodeExpand, onNodeCollapse, expandedNodeIds, isLoading },
   ref
 ) {
   const wrapperRef = useRef(null);
@@ -202,7 +214,17 @@ const OntologyGraph = forwardRef(function OntologyGraph(
     function handleNodeClick(event, d) {
       event.stopPropagation();
       onNodeSelect(d);
-      onNodeExpand(d);
+      if (expandedNodeIds?.has(d.id) && onNodeCollapse) {
+        // Already expanded → collapse on single click
+        const style = getStyle(d.type);
+        d3.select(event.currentTarget)
+          .transition().duration(120).attr('r', style.radius * 1.5)
+          .transition().duration(150).attr('r', style.radius)
+          .on('end', () => onNodeCollapse(d));
+      } else if (!expandedNodeIds?.has(d.id)) {
+        // Not yet expanded → expand
+        onNodeExpand(d);
+      }
     }
 
     const link = linkLayer
@@ -215,6 +237,39 @@ const OntologyGraph = forwardRef(function OntologyGraph(
       .attr('x2', (d) => positions.get(getLinkNodeId(d.target))?.x || 0)
       .attr('y2', (d) => positions.get(getLinkNodeId(d.target))?.y || 0);
 
+    // ── Edge relationship labels ─────────────────────────────────
+    const edgeLabelData = validLinks.filter((d) => d.relType);
+
+    const edgeLabelGroup = linkLayer
+      .selectAll('g.edge-label')
+      .data(edgeLabelData)
+      .join('g')
+      .attr('class', 'edge-label')
+      .attr('transform', (d) => {
+        const sx = positions.get(getLinkNodeId(d.source))?.x || 0;
+        const sy = positions.get(getLinkNodeId(d.source))?.y || 0;
+        const tx = positions.get(getLinkNodeId(d.target))?.x || 0;
+        const ty = positions.get(getLinkNodeId(d.target))?.y || 0;
+        return `translate(${(sx + tx) / 2}, ${(sy + ty) / 2})`;
+      });
+
+    edgeLabelGroup
+      .append('rect')
+      .attr('class', 'edge-label-bg')
+      .attr('rx', 4)
+      .attr('height', 16)
+      .each(function (d) {
+        const label = (d.relType || '').replace(/_/g, ' ');
+        const w = label.length * 6.2 + 10;
+        d3.select(this).attr('width', w).attr('x', -w / 2).attr('y', -9);
+      });
+
+    edgeLabelGroup
+      .append('text')
+      .attr('class', 'edge-label-text')
+      .attr('dy', 2)
+      .text((d) => (d.relType || '').replace(/_/g, ' '));
+
     const node = nodeLayer
       .selectAll('circle')
       .data(nodes)
@@ -223,6 +278,7 @@ const OntologyGraph = forwardRef(function OntologyGraph(
         const classes = ['graph-node'];
         if (d.id === selectedNode?.id) classes.push('selected');
         if (d.id === rootNode) classes.push('root');
+        if (expandedNodeIds?.has(d.id) && d.id !== rootNode) classes.push('expanded');
         return classes.join(' ');
       })
       .attr('r', (d) => getStyle(d.type).radius)
@@ -230,6 +286,16 @@ const OntologyGraph = forwardRef(function OntologyGraph(
       .attr('cx', (d) => positions.get(d.id)?.x || 0)
       .attr('cy', (d) => positions.get(d.id)?.y || 0)
       .on('click', handleNodeClick);
+
+    nodeLayer
+      .selectAll('circle.collapse-ring')
+      .data(nodes.filter((d) => expandedNodeIds?.has(d.id) && d.id !== rootNode))
+      .join('circle')
+      .attr('class', 'collapse-ring')
+      .attr('r', (d) => getStyle(d.type).radius + 5)
+      .attr('cx', (d) => positions.get(d.id)?.x || 0)
+      .attr('cy', (d) => positions.get(d.id)?.y || 0)
+      .style('pointer-events', 'none');
 
     const label = labelLayer
       .selectAll('text')
@@ -272,7 +338,8 @@ const OntologyGraph = forwardRef(function OntologyGraph(
     return () => {
       window.clearTimeout(centerTimer);
     };
-  }, [graph, onNodeExpand, onNodeSelect, rootNode, selectedNode?.id]);
+  }, [graph, onNodeExpand, onNodeCollapse, onNodeSelect, rootNode, selectedNode?.id, expandedNodeIds]);
+
 
   return (
     <div ref={wrapperRef} className="graph-stage">

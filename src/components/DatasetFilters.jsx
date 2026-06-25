@@ -11,12 +11,12 @@ const emptyOptions = {
   benchAging: { min: 0, max: 120 },
 };
 
-export default function DatasetFilters({ filters, onFiltersChange }) {
+export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 0 }) {
   const [options, setOptions] = useState(emptyOptions);
 
   useEffect(() => {
     getFilterOptions().then(setOptions).catch(() => setOptions(emptyOptions));
-  }, []);
+  }, [refreshKey]); // re-fetch every time a new file is ingested
 
   function updateFilter(name, value) {
     onFiltersChange((current) => ({ ...current, [name]: value }));
