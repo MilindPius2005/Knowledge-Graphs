@@ -68,16 +68,22 @@ export async function searchNodes(query, username) {
   return Array.isArray(results) ? results.map(normalizeResult) : [];
 }
 
-export function getDepartments() {
-  return requestJson('/departments');
+export function getDepartments(username) {
+  return requestJson('/departments', {
+    headers: userHeaders(username),
+  });
 }
 
-export function getSkills() {
-  return requestJson('/skills');
+export function getSkills(username) {
+  return requestJson('/skills', {
+    headers: userHeaders(username),
+  });
 }
 
-export function getFilterOptions() {
-  return requestJson('/filter-options');
+export function getFilterOptions(username) {
+  return requestJson('/filter-options', {
+    headers: userHeaders(username),
+  });
 }
 
 export async function filterEmployees(filters = {}, username) {

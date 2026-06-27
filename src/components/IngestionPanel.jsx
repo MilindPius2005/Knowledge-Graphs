@@ -30,7 +30,7 @@ function formatDate(iso) {
   return new Date(iso).toLocaleString();
 }
 
-export default function IngestionPanel({ onUploadSuccess }) {
+export default function IngestionPanel({ onUploadSuccess, username }) {
   // ── Upload tab state ──────────────────────────────────────────
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -54,9 +54,9 @@ export default function IngestionPanel({ onUploadSuccess }) {
   const [activeTab, setActiveTab] = useState('upload');
 
   useEffect(() => {
-    listIngestionJobs().then(setJobs).catch(() => setJobs([]));
-    listUploadHistory().then(setUploadHistory).catch(() => setUploadHistory([]));
-  }, []);
+    listIngestionJobs(username).then(setJobs).catch(() => setJobs([]));
+    listUploadHistory(username).then(setUploadHistory).catch(() => setUploadHistory([]));
+  }, [username]);
 
   // ── File selection helpers ────────────────────────────────────
   function validateFile(file) {
@@ -101,7 +101,7 @@ export default function IngestionPanel({ onUploadSuccess }) {
     }, 300);
 
     try {
-      const result = await uploadDocument(selectedFile);
+      const result = await uploadDocument(selectedFile, username);
       clearInterval(ticker);
       setUploadProgress(100);
       setUploadResult(result);
@@ -140,7 +140,7 @@ export default function IngestionPanel({ onUploadSuccess }) {
     setIsSubmitting(true);
     setJobError('');
     try {
-      const job = await submitIngestionJob({ sourceType, sourceName, content });
+      const job = await submitIngestionJob({ sourceType, sourceName, content }, username);
       setJobs((cur) => [job, ...cur.filter((j) => j.id !== job.id)]);
       recordEvent({ type: 'ingestion_submitted', jobId: job.id, sourceType, sourceName }).catch(() => {});
       setContent('');

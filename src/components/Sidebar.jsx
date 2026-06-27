@@ -45,6 +45,7 @@ export default function Sidebar({
         filters={filters}
         onFiltersChange={onFiltersChange}
         refreshKey={filterRefreshKey}
+        username={username}
       />
 
       <section className="sidebar-section">

@@ -1,0 +1,51 @@
+<mxfile host="Electron" modified="2026-06-26T02:49:36.000Z" agent="5.0" version="20.0.0" type="device">
+  <diagram id="diagram_1" name="Page-1">
+    <mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Root Title -->
+        <mxCell id="title" value="&lt;b&gt;&lt;font style=&quot;font-size: 24px;&quot;&gt;&lt;u&gt;Ontology Explorer Architecture:&lt;/u&gt;&lt;/font&gt;&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontColor=#0F2C84;" vertex="1" parent="1">
+          <mxGeometry x="238.5" y="40" width="350" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Node: Laptop (Client) -->
+        <mxCell id="laptop" value="Laptop Client&lt;br&gt;(React.js, Vite &amp; D3.js)" style="verticalLabelPosition=bottom;html=1;verticalAlign=top;align=center;strokeColor=none;fillColor=none;shape=mxgraph.azure.laptop;pointerEvents=1;fontColor=#0F2C84;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="320" width="120" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- Node: Flask Backend Server -->
+        <mxCell id="flask_server" value="Web Server&lt;br&gt;(Flask Backend &amp; Pandas)" style="verticalLabelPosition=bottom;html=1;verticalAlign=top;align=center;strokeColor=none;fillColor=none;shape=mxgraph.azure.web_role;pointerEvents=1;fontColor=#0F2C84;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="312.5" width="120" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Node: Neo4j Database Server -->
+        <mxCell id="neo4j_server" value="Graph Database Server&lt;br&gt;(Neo4j - 'super4j')" style="verticalLabelPosition=bottom;html=1;verticalAlign=top;align=center;strokeColor=none;fillColor=none;shape=mxgraph.azure.database;pointerEvents=1;fontColor=#0F2C84;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="600" y="312.5" width="100" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- Node: MongoDB Database Server -->
+        <mxCell id="mongodb_server" value="Database Server&lt;br&gt;(MongoDB - 'knowledge_graph')" style="verticalLabelPosition=bottom;html=1;verticalAlign=top;align=center;strokeColor=none;fillColor=none;shape=mxgraph.azure.database;pointerEvents=1;fontColor=#0F2C84;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="350" y="110" width="100" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- Edge: Laptop -> Flask Server -->
+        <mxCell id="edge_client_flask" value="HTTPS / REST" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#0F2C84;strokeWidth=1.5;fontColor=#0F2C84;" edge="1" parent="1" source="laptop" target="flask_server">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edge: Flask Server -> Neo4j -->
+        <mxCell id="edge_flask_neo4j" value="Bolt Protocol" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#0F2C84;strokeWidth=1.5;fontColor=#0F2C84;" edge="1" parent="1" source="flask_server" target="neo4j_server">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edge: Flask Server -> MongoDB -->
+        <mxCell id="edge_flask_mongodb" value="MongoDB Driver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#0F2C84;strokeWidth=1.5;fontColor=#0F2C84;" edge="1" parent="1" source="flask_server" target="mongodb_server">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

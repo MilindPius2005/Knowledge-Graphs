@@ -17,7 +17,10 @@ export default function ExplorerPage({ user, onLogout }) {
   function renderWorkspace() {
     if (activeView === 'events') return <EventsPanel />;
     if (activeView === 'ingestion') return (
-      <IngestionPanel onUploadSuccess={() => setFilterRefreshKey((k) => k + 1)} />
+      <IngestionPanel
+        username={user.email}
+        onUploadSuccess={() => setFilterRefreshKey((k) => k + 1)}
+      />
     );
     if (activeView === 'user') return <UserPage user={user} onLogout={onLogout} />;
 

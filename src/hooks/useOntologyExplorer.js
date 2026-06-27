@@ -76,7 +76,7 @@ export function useOntologyExplorer(username) {
     clientName: '',
     deploymentStatus: '',
     employee: '',
-    performanceManager: '',
+    campusLateral: '',
     skillGroup: '',
     skill: '',
   });

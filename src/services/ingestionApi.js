@@ -5,6 +5,10 @@ function shouldUseMock() {
   return import.meta.env.VITE_USE_MOCK_INGESTION === 'true';
 }
 
+function userHeaders(username) {
+  return username ? { 'X-Ontology-User': username } : {};
+}
+
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
@@ -31,10 +35,11 @@ function writeJobs(jobs) {
   localStorage.setItem(INGESTION_STORAGE_KEY, JSON.stringify(jobs));
 }
 
-export async function submitIngestionJob(payload) {
+export async function submitIngestionJob(payload, username) {
   if (!shouldUseMock()) {
     return requestJson('/ingestion/jobs', {
       method: 'POST',
+      headers: userHeaders(username),
       body: JSON.stringify(payload),
     });
   }
@@ -54,9 +59,11 @@ export async function submitIngestionJob(payload) {
   return job;
 }
 
-export async function listIngestionJobs() {
+export async function listIngestionJobs(username) {
   if (!shouldUseMock()) {
-    const data = await requestJson('/ingestion/jobs');
+    const data = await requestJson('/ingestion/jobs', {
+      headers: userHeaders(username),
+    });
     return Array.isArray(data) ? data : data.jobs || [];
   }
 
@@ -68,13 +75,14 @@ export async function listIngestionJobs() {
  * The backend parses it, writes nodes + relationships to Neo4j (super4j),
  * and returns an import summary.
  */
-export async function uploadDocument(file) {
+export async function uploadDocument(file, username) {
   const formData = new FormData();
   formData.append('file', file);
 
   const response = await fetch(`${API_BASE_URL}/ingestion/upload`, {
     method: 'POST',
     credentials: 'include',
+    headers: userHeaders(username),
     body: formData,
     // Do NOT set Content-Type manually — browser sets it with boundary automatically
   });
@@ -101,7 +109,9 @@ export async function uploadDocument(file) {
 /**
  * Fetch the list of previously uploaded documents.
  */
-export async function listUploadHistory() {
-  const data = await requestJson('/ingestion/uploads');
+export async function listUploadHistory(username) {
+  const data = await requestJson('/ingestion/uploads', {
+    headers: userHeaders(username),
+  });
   return Array.isArray(data) ? data : data.uploads || [];
 }

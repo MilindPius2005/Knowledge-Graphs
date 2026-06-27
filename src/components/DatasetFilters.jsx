@@ -5,18 +5,18 @@ const emptyOptions = {
   clients: [],
   deploymentStatuses: [],
   employees: [],
-  performanceManagers: [],
   skillGroups: [],
   skills: [],
   benchAging: { min: 0, max: 120 },
+  campusLaterals: [],
 };
 
-export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 0 }) {
+export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 0, username }) {
   const [options, setOptions] = useState(emptyOptions);
 
   useEffect(() => {
-    getFilterOptions().then(setOptions).catch(() => setOptions(emptyOptions));
-  }, [refreshKey]); // re-fetch every time a new file is ingested
+    getFilterOptions(username).then(setOptions).catch(() => setOptions(emptyOptions));
+  }, [refreshKey, username]); // re-fetch every time a new file is ingested or username changes
 
   function updateFilter(name, value) {
     onFiltersChange((current) => ({ ...current, [name]: value }));
@@ -30,7 +30,7 @@ export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 
       clientName: '',
       deploymentStatus: '',
       employee: '',
-      performanceManager: '',
+      campusLateral: '',
       skillGroup: '',
       skill: '',
     });
@@ -40,14 +40,6 @@ export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 
     <section className="sidebar-section filter-section">
       <div className="section-heading">Filters</div>
 
-      <label className="filter-check">
-        <input
-          type="checkbox"
-          checked={filters.ssl}
-          onChange={(event) => updateFilter('ssl', event.target.checked)}
-        />
-        <span>SSL - Lighthouse data only</span>
-      </label>
 
       <div className="filter-range">
         <span>Bench aging</span>
@@ -92,10 +84,10 @@ export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 
         options={options.employees}
       />
       <FilterSelect
-        label="Performance manager"
-        value={filters.performanceManager}
-        onChange={(value) => updateFilter('performanceManager', value)}
-        options={options.performanceManagers}
+        label="Campus/Lateral"
+        value={filters.campusLateral}
+        onChange={(value) => updateFilter('campusLateral', value)}
+        options={options.campusLaterals}
       />
       <FilterSelect
         label="Skill group"

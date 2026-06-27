@@ -82,7 +82,8 @@ function buildStructuredLayout(nodes, links, rootNode, width, height) {
   });
 
   const orderedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
-  const horizontalGap = width / Math.max(orderedDepths.length + 1, 2);
+  // Increase vertical gap by stretching height representation, leaving plenty of room
+  const verticalGap = (height * 1.5) / Math.max(orderedDepths.length + 1, 2);
   const positions = new Map();
 
   orderedDepths.forEach((depth, depthIndex) => {
@@ -91,13 +92,20 @@ function buildStructuredLayout(nodes, links, rootNode, width, height) {
       if (b.id === start) return 1;
       return (a.label || a.id).localeCompare(b.label || b.id);
     });
-    const verticalGap = height / Math.max(columnNodes.length + 1, 2);
-    const x = horizontalGap * (depthIndex + 1);
+    
+    // Distribute nodes horizontally within each depth layer
+    const horizontalGap = width / Math.max(columnNodes.length + 1, 2);
+    
+    // Add extra vertical gap below the root node (depthIndex 0) to highlight the main relationship
+    let y = verticalGap * (depthIndex + 1);
+    if (depthIndex > 0) {
+      y += verticalGap * 0.5; // Push everything down extra
+    }
 
     columnNodes.forEach((node, nodeIndex) => {
       positions.set(node.id, {
-        x,
-        y: verticalGap * (nodeIndex + 1),
+        x: horizontalGap * (nodeIndex + 1),
+        y,
       });
     });
   });
