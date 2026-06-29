@@ -147,9 +147,13 @@ def load_graph_dataset_from_neo4j(username):
                     continue
 
                 props = dict(record["props"] or {})
+                ALLOWED_GRAPH_LABELS = {
+                    "Employee", "Client", "Project", "Skill", "Department", "Level", "Module", "SkillGroup"
+                }
                 connected = [
                     item for item in (record["connected"] or [])
                     if item and item.get("name")
+                    and any(label in ALLOWED_GRAPH_LABELS for label in item.get("labels", []))
                 ]
 
                 def get_any(keys, default=""):
@@ -157,6 +161,14 @@ def load_graph_dataset_from_neo4j(username):
                         if key in props:
                             return props[key]
                     return default
+
+                def safe_int(val, default=0):
+                    if val is None or str(val).strip().lower() in ("nan", "none", ""):
+                        return default
+                    try:
+                        return int(float(val))
+                    except (ValueError, TypeError):
+                        return default
 
                 def connected_name(*labels):
                     label_set = {label.lower() for label in labels}
@@ -185,10 +197,10 @@ def load_graph_dataset_from_neo4j(username):
                     "Soft_BI_3": props.get("Soft_BI_3") or (skills[2] if len(skills) > 2 else ""),
                     "Practice_Update": props.get("Practice_Update") or "Available",
                     "Project": props.get("Project") or props.get("project") or connected_name("Project") or "",
-                    "Apr_Util": int(get_any(["april_utilization", "Apr_Util", "aprUtil"], 0)),
-                    "May_Util": int(get_any(["may_utilization", "May_Util", "mayUtil"], 0)),
-                    "YTD_Util": int(get_any(["ytd_utilization", "YTD_Util", "utilization"], 0)),
-                    "Util_Gap": int(props.get("Util_Gap") or props.get("utilGap") or 0),
+                    "Apr_Util": safe_int(get_any(["april_utilization", "Apr_Util", "aprUtil"], 0)),
+                    "May_Util": safe_int(get_any(["may_utilization", "May_Util", "mayUtil"], 0)),
+                    "YTD_Util": safe_int(get_any(["ytd_utilization", "YTD_Util", "utilization"], 0)),
+                    "Util_Gap": safe_int(props.get("Util_Gap") or props.get("utilGap") or 0),
                     "UG_Flag": get_any(["ug_flag", "UG_Flag", "ugFlag"], ""),
                     "RM_Remarks": get_any(["performance_unit", "performance_manager", "rm_remarks", "RM_Remarks"], "Unassigned"),
                     "Project_Status": get_any(["project_status", "Project_Status", "projectStatus"], "Active"),
@@ -196,7 +208,7 @@ def load_graph_dataset_from_neo4j(username):
                     "KPMG_Level": get_any(["kpmg_level", "KPMG_Level", "level"], ""),
                     "Current_Performance": get_any(["current_performance", "Current_Performance", "performance"], ""),
                     "LM_Rated": props.get("LM_Rated") or "Yes",
-                    "Q_Rating": int(get_any(["q_rating", "Q_Rating", "rating"], 0)),
+                    "Q_Rating": safe_int(get_any(["q_rating", "Q_Rating", "rating"], 0)),
                     "Skills": skills,
                     "Mobile": get_any(["mobile", "Mobile"], ""),
                     "Secondary_Skill": props.get("Secondary_Skill") or (skills[-1] if skills else ""),
@@ -217,6 +229,19 @@ def load_graph_dataset_from_neo4j(username):
 USER_DATA = {}
 
 
+def is_valid_value(val):
+    if val is None:
+        return False
+    if isinstance(val, float):
+        import math
+        if math.isnan(val):
+            return False
+    val_str = str(val).strip()
+    if val_str.lower() in ("nan", "none", ""):
+        return False
+    return True
+
+
 def build_ontology(rows):
     graph = {}
 
@@ -228,25 +253,38 @@ def build_ontology(rows):
             graph[source]["neighbors"].append(target)
 
     for row in rows:
-        name = row["Emp_Name"]
+        name = row.get("Emp_Name")
+        if not is_valid_value(name):
+            continue
+        name = str(name).strip()
         add(name, "Employee")
         facts = [
             (row.get("SST"), "Department"), (row.get("Client_Name"), "Client"),
             (row.get("Project"), "Project"), (row.get("KPMG_Level"), "Level"),
-            (row.get("Deployment_Status"), "Deployment Status"),
-            (row.get("Current_Performance"), "Performance"),
-            (row.get("UG_Flag"), "Utilization Flag"), (row.get("Project_Status"), "Project Status"),
-            (row.get("SS"), "Service Segment"), (row.get("Month"), "Month"),
         ]
         for value, node_type in facts:
-            if not value:
+            if not is_valid_value(value):
                 continue
-            add(value, node_type)
-            link(name, value)
-            link(value, name)
-        for skill in [row.get("Soft_BI"), row.get("Soft_BI_2"), row.get("Soft_BI_3"), row.get("Secondary_Skill"), *row.get("Skills", [])]:
-            if not skill:
-                continue
+            val_str = str(value).strip()
+            add(val_str, node_type)
+            link(name, val_str)
+            link(val_str, name)
+        skills_raw = []
+        for s in [row.get("Soft_BI"), row.get("Soft_BI_2"), row.get("Soft_BI_3"), row.get("Secondary_Skill")]:
+            if is_valid_value(s):
+                skills_raw.extend([v.strip() for v in str(s).split(",") if v.strip()])
+        
+        skills_val = row.get("Skills")
+        if skills_val:
+            if isinstance(skills_val, list):
+                for s in skills_val:
+                    if is_valid_value(s):
+                        skills_raw.extend([v.strip() for v in str(s).split(",") if v.strip()])
+            else:
+                if is_valid_value(skills_val):
+                    skills_raw.extend([v.strip() for v in str(skills_val).split(",") if v.strip()])
+
+        for skill in skills_raw:
             add(skill, "Skill")
             link(name, skill)
             link(skill, name)
@@ -681,14 +719,33 @@ def employee_profile(employee_name, username=None):
     # 5. performance_manager
     performance_manager = meta.get("RM_Remarks") or meta.get("performance_unit") or meta.get("performance_manager") or "Unassigned"
 
+    # 6. ssl (Lighthouse function)
+    lh_func = meta.get("lh_function") or meta.get("LH_Function") or meta.get("LH function") or connected_neighbor_of_type(employee_name, "LHFunction", username)
+    ssl = bool(lh_func)
 
     # 7. level
     level = meta.get("KPMG_Level") or meta.get("level") or connected_neighbor_of_type(employee_name, "Level", username) or ""
 
-  
+    # 8. performance
+    performance = meta.get("Current_Performance") or meta.get("performance") or connected_neighbor_of_type(employee_name, "Performance", username) or ""
+
+    # 9. utilization
+    utilization = meta.get("YTD_Util") or meta.get("ytd_utilization") or meta.get("YTD utilization")
+    if utilization is None:
+        utilization_str = connected_neighbor_of_type(employee_name, "Utilization", username)
+        try:
+            utilization = int(float(utilization_str)) if utilization_str else 0
+        except (ValueError, TypeError):
+            utilization = 0
+    else:
+        try:
+            utilization = int(float(utilization))
+        except (ValueError, TypeError):
+            utilization = 0
 
     return {
         "employee": employee_name, 
+        "ssl": ssl,
         "bench_aging": bench_aging,
         "client_name": client_name,
         "deployment_status": deployment_status,
@@ -785,7 +842,6 @@ def auth_login():
 def auth_me():
     return jsonify({"user": public_user(get_current_user())})
 
-
 @app.route("/auth/logout", methods=["POST"])
 def auth_logout():
     clear_session()
@@ -867,14 +923,12 @@ def ingestion_jobs():
         del runtime_ingestion_jobs[50:]
     return jsonify(job)
 
-
 @app.route("/")
 def home():
     return jsonify({
         "message": "Ontology Engine Running",
         "mongoConnected": mongo_db is not None,
     })
-
 
 @app.route("/expand/<path:node>", methods=["GET", "POST"])
 def expand(node):
@@ -884,7 +938,6 @@ def expand(node):
         return jsonify({"nodes": [], "links": []}), 200
     graph = generate_graph(node, username)
     return jsonify(graph), 404 if graph.get("error") else 200
-
 
 @app.route("/expand_recursive/<path:node>/<int:depth>")
 def recursive(node, depth):
@@ -898,7 +951,6 @@ def recursive(node, depth):
 
     return jsonify(expand_recursive(canonical_name, depth, username))
 
-
 @app.route("/overrides/<path:node>", methods=["GET", "PUT", "DELETE"])
 def node_override(node):
     username = get_active_username()
@@ -908,7 +960,6 @@ def node_override(node):
         return jsonify({"error": "A signed-in user is required"}), 400
     if not canonical_name:
         return jsonify({"error": f"Node '{node}' not found"}), 404
-
     if request.method == "GET":
         return jsonify({
             "node": canonical_name,
@@ -918,7 +969,6 @@ def node_override(node):
             },
             "override": get_node_override(username, canonical_name)
         })
-
     with overrides_lock:
          if request.method == "DELETE":
              delete_node_override(username, canonical_name)
@@ -954,7 +1004,6 @@ def node_override(node):
 
     return jsonify({"ok": True, "override": get_node_override(username, canonical_name)})
 
-
 @app.route("/search")
 def search():
     username = get_active_username()
@@ -979,19 +1028,15 @@ def search():
     ]
     return jsonify({"results": matches[:30]})
 
-
 @app.route("/departments")
 def departments():
     username = get_active_username()
     return jsonify(node_names_by_type("Department", username))
 
-
 @app.route("/skills")
 def skills():
     username = get_active_username()
     return jsonify(node_names_by_type("Skill", username))
-
-
 @app.route("/employees")
 def employees():
     username = get_active_username()
@@ -1087,7 +1132,6 @@ def employees():
     ]
     return jsonify({"results": results})
 
-
 @app.route("/filter-options")
 def filter_options():
     username = get_active_username()
@@ -1139,8 +1183,6 @@ def filter_options():
         "campusLaterals": sorted(list(campus_laterals)),
     })
 
-
-
 @app.route("/admin-change-requests", methods=["POST"])
 def admin_change_request():
     username = request_username()
@@ -1163,10 +1205,8 @@ def admin_change_request():
     write_admin_requests(requests)
     return jsonify({"ok": True, "request": request_record})
 
-
 # ─────────────────────────────────────────────────────────────
 # Document Upload & Neo4j Ingestion
-
 def _parse_uploaded_file(file_storage):
     """Parse CSV, Excel or JSON file into a list of row dicts."""
     filename = file_storage.filename or ""
@@ -1200,7 +1240,6 @@ def _parse_uploaded_file(file_storage):
         return df.to_dict(orient="records")
 
     raise ValueError(f"Unsupported file type: .{ext}. Use CSV, XLSX, XLS or JSON.")
-
 
 def _ingest_rows_to_neo4j(rows, username):
     """
@@ -1278,33 +1317,38 @@ def _ingest_rows_to_neo4j(rows, username):
                     rel_type = col.upper().replace(" ", "_").replace("-", "_").replace("/", "_")
                     col_label = COLUMN_LABEL_MAP.get(col, col.strip())
 
-                    # MERGE related node using the mapped label and owner
-                    session.run(
-                        f"MERGE (n:`{col_label}` {{name: $name, owner: $owner}})",
-                        name=cell_val,
-                        owner=username
-                    )
-                    nodes_merged.add((col_label, cell_val))
+                    # If this is a Skill node column, split comma-separated items
+                    vals_to_process = [cell_val]
+                    if col_label == "Skill":
+                        vals_to_process = [v.strip() for v in cell_val.split(",") if v.strip()]
 
-                    # MERGE relationship
-                    session.run(
-                        f"""
-                        MATCH (a:`{primary_label}` {{name: $primary, owner: $owner}})
-                        MATCH (b:`{col_label}` {{name: $related, owner: $owner}})
-                        MERGE (a)-[r:`{rel_type}`]->(b)
-                        ON CREATE SET r.owner = $owner
-                        ON MATCH SET r.owner = $owner
-                        """,
-                        primary=primary_val,
-                        related=cell_val,
-                        owner=username
-                    )
-                    rels_merged.add((primary_val, rel_type, cell_val))
+                    for val in vals_to_process:
+                        # MERGE related node using the mapped label and owner
+                        session.run(
+                            f"MERGE (n:`{col_label}` {{name: $name, owner: $owner}})",
+                            name=val,
+                            owner=username
+                        )
+                        nodes_merged.add((col_label, val))
+
+                        # MERGE relationship
+                        session.run(
+                            f"""
+                            MATCH (a:`{primary_label}` {{name: $primary, owner: $owner}})
+                            MATCH (b:`{col_label}` {{name: $related, owner: $owner}})
+                            MERGE (a)-[r:`{rel_type}`]->(b)
+                            ON CREATE SET r.owner = $owner
+                            ON MATCH SET r.owner = $owner
+                            """,
+                            primary=primary_val,
+                            related=val,
+                            owner=username
+                        )
+                        rels_merged.add((primary_val, rel_type, val))
     finally:
         driver.close()
 
     return len(nodes_merged), len(rels_merged)
-
 
 def _rebuild_ontology_from_neo4j(username):
     """Re-read the user's graph from Neo4j and rebuild the in-memory ontology for that user."""
@@ -1348,22 +1392,30 @@ def _rebuild_ontology_from_neo4j(username):
                 """,
                 owner=username
             )
+            ALLOWED_GRAPH_LABELS = {
+                "Employee", "Client", "Project", "Skill", "Department", "Level", "Module", "SkillGroup"
+            }
             for record in result:
                 name = record["name"]
                 if not name:
                     continue
                 labels = record["labels"] or []
                 node_type = labels[0] if labels else "Unknown"
+                if node_type not in ALLOWED_GRAPH_LABELS:
+                    continue
                 if name not in state["ontology"]:
                     state["ontology"][name] = {"type": node_type, "neighbors": []}
                 for rel in (record["rels"] or []):
                     target = rel.get("target")
                     rel_type = rel.get("type") or ""
+                    target_labels = rel.get("targetLabels") or []
+                    target_type = target_labels[0] if target_labels else "Unknown"
+                    if target_type not in ALLOWED_GRAPH_LABELS:
+                        continue
                     if target and target not in state["ontology"][name]["neighbors"]:
                         state["ontology"][name]["neighbors"].append(target)
                     if target and target not in state["ontology"]:
-                        tl = (rel.get("targetLabels") or ["Unknown"])
-                        state["ontology"][target] = {"type": tl[0], "neighbors": []}
+                        state["ontology"][target] = {"type": target_type, "neighbors": []}
                     if target and name not in state["ontology"][target]["neighbors"]:
                         state["ontology"][target]["neighbors"].append(name)
                     # Store the relationship type for edge label display
@@ -1374,7 +1426,6 @@ def _rebuild_ontology_from_neo4j(username):
     finally:
         if driver:
             driver.close()
-
 
 @app.route("/ingestion/upload", methods=["POST"])
 def ingestion_upload():
@@ -1454,7 +1505,6 @@ def ingestion_upload():
 
     return jsonify(record), 200
 
-
 @app.route("/ingestion/uploads", methods=["GET"])
 def ingestion_uploads():
     """List past document uploads."""
@@ -1465,7 +1515,6 @@ def ingestion_uploads():
     else:
         records = [r for r in runtime_upload_history if r.get("username") == username]
     return jsonify({"uploads": records})
-
 
 @app.route("/admin/refresh", methods=["POST"])
 def admin_refresh():
@@ -1484,7 +1533,6 @@ def admin_refresh():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
 
-
 # ── Startup: rebuild ontology + edge map from existing Neo4j data ────────────
 # Verify connection to Neo4j. Cache states are loaded dynamically per-user.
 if GraphDatabase is not None:
@@ -1498,7 +1546,6 @@ if GraphDatabase is not None:
         _driver.close()
     except Exception:
         pass
-
 
 if __name__ == "__main__":
     app.run(

@@ -126,8 +126,10 @@ class TestOntologyExplorer(unittest.TestCase):
             "ClientA": {"type": "Client", "neighbors": []},
             "SkillA": {"type": "Skill", "neighbors": []},
             "ProjectA": {"type": "Project", "neighbors": []},
-            "10.0": {"type": "BenchAging", "neighbors": []},
-            "20.0": {"type": "BenchAging", "neighbors": []}
+        }
+        state["employee_meta"] = {
+            "Emp1": {"bench_aging": 10},
+            "Emp2": {"bench_aging": 20}
         }
 
         response = self.client.get(
