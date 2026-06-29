@@ -611,7 +611,6 @@ def find_user_by_email(email):
     users = mongo_collection("users")
     if users is not None:
         return users.find_one({"email": clean_email})
-
     return next((user for user in runtime_users if user["email"] == clean_email), None)
 
 def find_user_by_id(user_id):
