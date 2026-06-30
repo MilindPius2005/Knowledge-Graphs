@@ -89,6 +89,13 @@ export function getFilterOptions(username) {
 export async function filterEmployees(filters = {}, username) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
+    // Handle skills array: join into comma-separated string
+    if (key === 'skills' && Array.isArray(value)) {
+      if (value.length > 0) {
+        params.set('skills', value.join(','));
+      }
+      return;
+    }
     if (value !== undefined && value !== null && String(value).trim() !== '') {
       params.set(key, String(value).trim());
     }

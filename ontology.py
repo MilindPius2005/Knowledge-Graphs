@@ -229,6 +229,34 @@ def load_graph_dataset_from_neo4j(username):
 USER_DATA = {}
 
 
+def parse_skills(val):
+    if val is None:
+        return []
+    if isinstance(val, list):
+        items = val
+    elif isinstance(val, float):
+        import math
+        if math.isnan(val):
+            return []
+        items = [str(int(val))]
+    elif isinstance(val, int):
+        items = [str(val)]
+    else:
+        items = [str(val)]
+    
+    parsed = []
+    for item in items:
+        if not item:
+            continue
+        cleaned = str(item).replace("|", ",").replace(";", ",")
+        for part in cleaned.split(","):
+            part_clean = part.strip()
+            if part_clean and part_clean.lower() not in ("nan", "none", ""):
+                if part_clean not in parsed:
+                    parsed.append(part_clean)
+    return parsed
+
+
 def is_valid_value(val):
     if val is None:
         return False
@@ -252,6 +280,16 @@ def build_ontology(rows):
         if target not in graph[source]["neighbors"]:
             graph[source]["neighbors"].append(target)
 
+    # Generate top-level taxonomy nodes under "Skills"
+    add("Skills", "SkillGroup")
+    add("Skill", "SkillGroup")
+    add("Misc Skill", "SkillGroup")
+
+    link("Skills", "Skill")
+    link("Skill", "Skills")
+    link("Skills", "Misc Skill")
+    link("Misc Skill", "Skills")
+
     for row in rows:
         name = row.get("Emp_Name")
         if not is_valid_value(name):
@@ -269,25 +307,31 @@ def build_ontology(rows):
             add(val_str, node_type)
             link(name, val_str)
             link(val_str, name)
+
+        # Parse normal/core skills (using reuseable parse_skills helper)
         skills_raw = []
-        for s in [row.get("Soft_BI"), row.get("Soft_BI_2"), row.get("Soft_BI_3"), row.get("Secondary_Skill")]:
-            if is_valid_value(s):
-                skills_raw.extend([v.strip() for v in str(s).split(",") if v.strip()])
-        
-        skills_val = row.get("Skills")
-        if skills_val:
-            if isinstance(skills_val, list):
-                for s in skills_val:
-                    if is_valid_value(s):
-                        skills_raw.extend([v.strip() for v in str(s).split(",") if v.strip()])
-            else:
-                if is_valid_value(skills_val):
-                    skills_raw.extend([v.strip() for v in str(skills_val).split(",") if v.strip()])
+        for s in [row.get("Soft_BI"), row.get("Soft_BI_2"), row.get("Soft_BI_3"), row.get("Secondary_Skill"), row.get("Skills")]:
+            skills_raw.extend(parse_skills(s))
 
         for skill in skills_raw:
             add(skill, "Skill")
+            # Link Skill Category -> Individual Skill
+            link("Skill", skill)
+            link(skill, "Skill")
+            # Link Employee -> Individual Skill
             link(name, skill)
             link(skill, name)
+
+        # Parse miscellaneous skills
+        misc_raw = parse_skills(row.get("misc skill") or row.get("Misc_Skill") or row.get("Misc Skill"))
+        for m_skill in misc_raw:
+            add(m_skill, "Skill")
+            # Link Misc Skill Category -> Individual Misc Skill
+            link("Misc Skill", m_skill)
+            link(m_skill, "Misc Skill")
+            # Link Employee -> Individual Misc Skill
+            link(name, m_skill)
+            link(m_skill, name)
 
     return graph
 
@@ -929,6 +973,11 @@ def home():
         "mongoConnected": mongo_db is not None,
     })
 
+
+@app.route("/healthz")
+def healthz():
+    return "OK", 200
+
 @app.route("/expand/<path:node>", methods=["GET", "POST"])
 def expand(node):
     username = get_active_username()
@@ -1015,7 +1064,14 @@ def search():
         if state["ontology"].get(name, {}).get("type") != "Employee":
             return False
         profile = employee_profile(name, username)
-        return any(query in str(value).lower() for value in profile.values())
+        if any(query in str(value).lower() for value in profile.values()):
+            return True
+        for neighbor in state["ontology"][name].get("neighbors", []):
+            neighbor_data = state["ontology"].get(neighbor, {})
+            if neighbor_data.get("type") == "Skill":
+                if query in neighbor.lower() or query in user_label(username, neighbor).lower():
+                    return True
+        return False
 
     matches = [
         serialize_search_result(name, username)
@@ -1046,6 +1102,14 @@ def employees():
     name_filter = request.args.get("name", "").strip().lower()
     department = find_effective_node_name(request.args.get("department", ""), username)
     skill = find_effective_node_name(request.args.get("skill", ""), username)
+    # Multi-skill AND filter: comma-separated list of skill names
+    skills_param = request.args.get("skills", "").strip()
+    required_skills = []
+    if skills_param:
+        for s in skills_param.split(","):
+            resolved = find_effective_node_name(s.strip(), username)
+            if resolved:
+                required_skills.append(resolved)
     ssl = request.args.get("ssl", "").strip().lower()
     bench_min = request.args.get("benchMin", "").strip()
     bench_max = request.args.get("benchMax", "").strip()
@@ -1091,7 +1155,17 @@ def employees():
             members = set(department_node.get("neighbors", []))
             employee_names = [name for name in employee_names if name in members]
 
-    if skill:
+    # Multi-skill AND filter: employee must have ALL requested skills as neighbors
+    if required_skills:
+        employee_names = [
+            name for name in employee_names
+            if all(
+                sk in state["ontology"].get(name, {}).get("neighbors", [])
+                for sk in required_skills
+            )
+        ]
+    elif skill:
+        # Backward compatibility: single skill filter
         skill_node = state["ontology"].get(skill, {})
         if skill_node.get("type") != "Skill":
             employee_names = []
@@ -1149,7 +1223,9 @@ def filter_options():
         }), 200
     employees = node_names_by_type("Employee", username)
     clients   = sorted(node_names_by_type("Client", username))
-    skills    = sorted(node_names_by_type("Skill", username))
+    # Exclude taxonomy category nodes from the skills dropdown
+    taxonomy_nodes = {"Skills", "Skill", "Misc Skill"}
+    skills    = sorted(s for s in node_names_by_type("Skill", username) if s not in taxonomy_nodes)
     skill_groups = sorted(node_names_by_type("SkillGroup", username))
     projects  = sorted(node_names_by_type("Project", username))
 
@@ -1316,10 +1392,10 @@ def _ingest_rows_to_neo4j(rows, username):
                     rel_type = col.upper().replace(" ", "_").replace("-", "_").replace("/", "_")
                     col_label = COLUMN_LABEL_MAP.get(col, col.strip())
 
-                    # If this is a Skill node column, split comma-separated items
+                    # If this is a Skill node column, split comma/semicolon/bar-separated items
                     vals_to_process = [cell_val]
                     if col_label == "Skill":
-                        vals_to_process = [v.strip() for v in cell_val.split(",") if v.strip()]
+                        vals_to_process = parse_skills(cell_val)
 
                     for val in vals_to_process:
                         # MERGE related node using the mapped label and owner

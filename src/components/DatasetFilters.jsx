@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getFilterOptions } from '../services/ontologyApi.js';
+import SkillMultiSelect from './SkillMultiSelect.jsx';
 
 const emptyOptions = {
   clients: [],
@@ -11,7 +12,7 @@ const emptyOptions = {
   campusLaterals: [],
 };
 
-export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 0, username }) {
+export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 0, username, onResetGraph }) {
   const [options, setOptions] = useState(emptyOptions);
 
   useEffect(() => {
@@ -23,17 +24,22 @@ export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 
   }
 
   function resetFilters() {
-    onFiltersChange({
-      ssl: false,
-      benchMin: '',
-      benchMax: '',
-      clientName: '',
-      deploymentStatus: '',
-      employee: '',
-      campusLateral: '',
-      skillGroup: '',
-      skill: '',
-    });
+    // Objective 7: Full reset — clear filters, search, graph, everything
+    if (onResetGraph) {
+      onResetGraph();
+    } else {
+      onFiltersChange({
+        ssl: false,
+        benchMin: '',
+        benchMax: '',
+        clientName: '',
+        deploymentStatus: '',
+        employee: '',
+        campusLateral: '',
+        skillGroup: '',
+        skills: [],
+      });
+    }
   }
 
   return (
@@ -95,11 +101,11 @@ export default function DatasetFilters({ filters, onFiltersChange, refreshKey = 
         onChange={(value) => updateFilter('skillGroup', value)}
         options={options.skillGroups}
       />
-      <FilterSelect
-        label="Skill"
-        value={filters.skill}
-        onChange={(value) => updateFilter('skill', value)}
+
+      <SkillMultiSelect
+        selected={filters.skills || []}
         options={options.skills}
+        onChange={(skills) => updateFilter('skills', skills)}
       />
 
       <button className="secondary-button filter-reset" type="button" onClick={resetFilters}>

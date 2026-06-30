@@ -74,6 +74,7 @@ export default function ExplorerPage({ user, onLogout }) {
         graph={explorer.graph}
         username={user.email}
         filterRefreshKey={filterRefreshKey}
+        onResetGraph={explorer.resetExplorer}
         onOverrideChanged={() => {
           if (explorer.rootNode) {
             explorer.loadGraph(explorer.rootNode, { pushHistory: false });

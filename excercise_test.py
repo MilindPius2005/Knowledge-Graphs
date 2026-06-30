@@ -125,6 +125,8 @@ class TestOntologyExplorer(unittest.TestCase):
         state["ontology"] = {
             "ClientA": {"type": "Client", "neighbors": []},
             "SkillA": {"type": "Skill", "neighbors": []},
+            "Skills": {"type": "Skill", "neighbors": []},
+            "Misc Skill": {"type": "Skill", "neighbors": []},
             "ProjectA": {"type": "Project", "neighbors": []},
         }
         state["employee_meta"] = {
@@ -142,6 +144,8 @@ class TestOntologyExplorer(unittest.TestCase):
         self.assertIn("ClientA", data["clients"])
         self.assertIn("skills", data)
         self.assertIn("SkillA", data["skills"])
+        self.assertNotIn("Skills", data["skills"])
+        self.assertNotIn("Misc Skill", data["skills"])
         self.assertIn("benchAging", data)
         self.assertEqual(data["benchAging"]["min"], 10)
         self.assertEqual(data["benchAging"]["max"], 20)
@@ -165,6 +169,26 @@ class TestOntologyExplorer(unittest.TestCase):
         self.assertIn("results", data)
         matching_ids = [item["id"] for item in data["results"]]
         self.assertIn("EmployeeA", matching_ids)
+
+    def test_multi_skill_filtering(self):
+        username = "multiskill@example.com"
+        state = get_user_state(username)
+        
+        state["ontology"] = {
+            "EmpBoth": {"type": "Employee", "neighbors": ["Python", "AWS"]},
+            "EmpOne": {"type": "Employee", "neighbors": ["Python"]},
+            "Python": {"type": "Skill", "neighbors": ["EmpBoth", "EmpOne"]},
+            "AWS": {"type": "Skill", "neighbors": ["EmpBoth"]}
+        }
+        response = self.client.get(
+            "/employees?skills=Python,AWS",
+            headers={"X-Ontology-User": username}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        matching_ids = [item["id"] for item in data["results"]]
+        self.assertIn("EmpBoth", matching_ids)
+        self.assertNotIn("EmpOne", matching_ids)
 
 if __name__ == "__main__":
     unittest.main()

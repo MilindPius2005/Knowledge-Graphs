@@ -78,7 +78,7 @@ export function useOntologyExplorer(username) {
     employee: '',
     campusLateral: '',
     skillGroup: '',
-    skill: '',
+    skills: [],
   });
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -108,6 +108,30 @@ export function useOntologyExplorer(username) {
       setSearchResults([]);
       setPendingGraphRoot(null);
     }
+  }, []);
+
+  const resetExplorer = useCallback(() => {
+    setGraph({ nodes: [], links: [] });
+    setRootNode('');
+    setSelectedNode(null);
+    setExpandedNodeIds(new Set());
+    setFilters({
+      ssl: false,
+      benchMin: '',
+      benchMax: '',
+      clientName: '',
+      deploymentStatus: '',
+      employee: '',
+      campusLateral: '',
+      skillGroup: '',
+      skills: [],
+    });
+    setHistory([]);
+    setHistoryIndex(-1);
+    setSearchResults([]);
+    setPendingGraphRoot(null);
+    setSearchQuery('');
+    setError('');
   }, []);
 
   const loadGraph = useCallback(
@@ -172,12 +196,27 @@ export function useOntologyExplorer(username) {
         ssl: filters.ssl ? 'true' : '',
         query: cleanQuery || undefined,
       };
-      const hasActiveFilters = Object.values(activeFilters).some(hasValue);
-      const hasSidebarFilters = Object.values(filters).some(hasValue);
+      const hasActiveFilters = Object.values(activeFilters).some((v) => {
+        if (Array.isArray(v)) return v.length > 0;
+        return hasValue(v);
+      });
+      const hasSidebarFilters = Object.values(filters).some((v) => {
+        if (Array.isArray(v)) return v.length > 0;
+        return hasValue(v);
+      });
 
       if (!hasActiveFilters) {
         setSearchResults([]);
         setPendingGraphRoot(null);
+        // Objective 6: Auto-clear graph when search is empty AND no filters
+        if (graph.nodes.length > 0) {
+          setGraph({ nodes: [], links: [] });
+          setRootNode('');
+          setSelectedNode(null);
+          setExpandedNodeIds(new Set());
+          setHistory([]);
+          setHistoryIndex(-1);
+        }
         return;
       }
 
@@ -441,5 +480,6 @@ export function useOntologyExplorer(username) {
     goBack,
     goForward,
     generateKnowledgeGraph,
+    resetExplorer,
   };
 }
